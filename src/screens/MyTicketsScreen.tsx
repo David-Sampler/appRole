@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { View, Text, StyleSheet, FlatList, ActivityIndicator, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, FlatList, ActivityIndicator, RefreshControl, Pressable, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import QRCode from 'react-native-qrcode-svg';
 import { useFocusEffect } from '@react-navigation/native';
@@ -19,6 +19,7 @@ export default function MyTicketsScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
 
   const fetchTickets = useCallback(async (opts: { silent?: boolean } = {}) => {
     if (!opts.silent) setIsLoading(true);
@@ -43,6 +44,32 @@ export default function MyTicketsScreen() {
   const handleRefresh = () => {
     setIsRefreshing(true);
     fetchTickets({ silent: true });
+  };
+
+  const handleCancelTicket = (ticket: PurchasedTicket) => {
+    Alert.alert(
+      'Cancelar ingresso',
+      'Tem certeza que deseja cancelar este ingresso? O valor pago será reembolsado.',
+      [
+        { text: 'Voltar', style: 'cancel' },
+        {
+          text: 'Cancelar ingresso',
+          style: 'destructive',
+          onPress: async () => {
+            setCancellingId(ticket.id);
+            try {
+              await ticketsApi.cancelTicket(ticket.id);
+              await fetchTickets({ silent: true });
+            } catch (err) {
+              const message = err instanceof ApiError ? err.message : 'Não foi possível cancelar o ingresso.';
+              Alert.alert('Erro', message);
+            } finally {
+              setCancellingId(null);
+            }
+          },
+        },
+      ]
+    );
   };
 
   if (isLoading) {
@@ -140,6 +167,23 @@ export default function MyTicketsScreen() {
                 <Text style={styles.date}>{formatDateTime(item.purchasedAt)}</Text>
               </View>
             </View>
+
+            {item.status === 'paid' && !item.checkedInAt && (
+              <Pressable
+                style={styles.cancelTicketButton}
+                onPress={() => handleCancelTicket(item)}
+                disabled={cancellingId === item.id}
+              >
+                {cancellingId === item.id ? (
+                  <ActivityIndicator size="small" color="#DC2626" />
+                ) : (
+                  <>
+                    <Ionicons name="close-circle-outline" size={16} color="#DC2626" />
+                    <Text style={styles.cancelTicketButtonText}>Cancelar ingresso</Text>
+                  </>
+                )}
+              </Pressable>
+            )}
           </View>
         )}
       />
@@ -213,4 +257,16 @@ const styles = StyleSheet.create({
   code: { fontSize: 13, fontWeight: '700', letterSpacing: 1 },
   price: { fontSize: 13, fontWeight: '700', color: '#059669' },
   date: { fontSize: 12, color: '#374151' },
+  cancelTicketButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 14,
+    borderWidth: 1,
+    borderColor: '#FCA5A5',
+    borderRadius: 10,
+    paddingVertical: 10,
+  },
+  cancelTicketButtonText: { fontSize: 12, fontWeight: '700', color: '#DC2626' },
 });

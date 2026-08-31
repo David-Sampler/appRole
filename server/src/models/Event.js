@@ -19,6 +19,7 @@ const eventSchema = new mongoose.Schema(
     location: { type: String, required: true },
     imageUrl: { type: String, required: true },
     ticketTypes: { type: [ticketTypeSchema], required: true, validate: (v) => v.length > 0 },
+    status: { type: String, enum: ['active', 'cancelled'], default: 'active' },
   },
   { timestamps: true }
 );

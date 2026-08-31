@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   View,
   Text,
@@ -7,28 +7,42 @@ import {
   ScrollView,
   Pressable,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { OrganizerStackParamList } from '../navigation/types';
-import { createEvent as createEventApi } from '../api/events';
+import { createEvent as createEventApi, updateEvent as updateEventApi, getEvent } from '../api/events';
 import { ApiError } from '../api/client';
 import { CATEGORIES } from '../data/categories';
 import PrimaryButton from '../components/PrimaryButton';
 import { useThemeStore } from '../store/useThemeStore';
+import { useAuthStore } from '../store/useAuthStore';
 
 type Props = NativeStackScreenProps<OrganizerStackParamList, 'CreateEvent'>;
 
 interface DraftTicketType {
   key: string;
+  id?: string;
   name: string;
   price: string;
   quantity: string;
 }
 
-export default function CreateEventScreen({ navigation }: Props) {
+export default function CreateEventScreen({ navigation, route }: Props) {
   const colors = useThemeStore((s) => s.colors);
+  const currentUser = useAuthStore((s) => s.user);
+  const verifyEmail = useAuthStore((s) => s.verifyEmail);
+  const resendVerification = useAuthStore((s) => s.resendVerification);
+  const eventId = route.params?.eventId;
+  const isEditing = Boolean(eventId);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isLoading, setIsLoading] = useState(isEditing);
+
+  const [verifyCode, setVerifyCode] = useState('');
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [isResending, setIsResending] = useState(false);
 
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState(CATEGORIES[0]);
@@ -40,6 +54,44 @@ export default function CreateEventScreen({ navigation }: Props) {
   const [ticketTypes, setTicketTypes] = useState<DraftTicketType[]>([
     { key: '1', name: 'Inteira', price: '', quantity: '' },
   ]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!eventId) return;
+      let cancelled = false;
+      setIsLoading(true);
+      getEvent(eventId)
+        .then(({ event }) => {
+          if (cancelled) return;
+          setTitle(event.title);
+          setCategory(event.category);
+          setDescription(event.description);
+          setDate(event.date);
+          setTime(event.time);
+          setLocation(event.location);
+          setImageUrl(event.imageUrl);
+          setTicketTypes(
+            event.ticketTypes.map((tt) => ({
+              key: tt.id,
+              id: tt.id,
+              name: tt.name,
+              price: String(tt.price),
+              quantity: String(tt.quantityAvailable),
+            }))
+          );
+        })
+        .catch((err) => {
+          const message = err instanceof ApiError ? err.message : 'Não foi possível carregar o evento.';
+          Alert.alert('Erro', message);
+        })
+        .finally(() => {
+          if (!cancelled) setIsLoading(false);
+        });
+      return () => {
+        cancelled = true;
+      };
+    }, [eventId])
+  );
 
   const addTicketType = () => {
     setTicketTypes((prev) => [
@@ -94,32 +146,116 @@ export default function CreateEventScreen({ navigation }: Props) {
         Alert.alert('Quantidade inválida', `Verifique a quantidade do ingresso "${tt.name}".`);
         return;
       }
-      parsedTicketTypes.push({ name: tt.name.trim(), price, quantityAvailable: quantity });
+      parsedTicketTypes.push({ id: tt.id, name: tt.name.trim(), price, quantityAvailable: quantity });
     }
 
     setIsSubmitting(true);
     try {
-      await createEventApi({
-        title: title.trim(),
-        description: description.trim(),
-        category,
-        date: date.trim(),
-        time: time.trim(),
-        location: location.trim(),
-        imageUrl: imageUrl.trim() || undefined,
-        ticketTypes: parsedTicketTypes,
-      });
-
-      Alert.alert('Evento publicado!', 'Seu evento já está visível para os compradores.');
-      resetForm();
+      if (isEditing && eventId) {
+        await updateEventApi(eventId, {
+          title: title.trim(),
+          description: description.trim(),
+          category,
+          date: date.trim(),
+          time: time.trim(),
+          location: location.trim(),
+          imageUrl: imageUrl.trim() || undefined,
+          ticketTypes: parsedTicketTypes,
+        });
+        Alert.alert('Evento atualizado!', 'As alterações já estão visíveis para os compradores.');
+      } else {
+        await createEventApi({
+          title: title.trim(),
+          description: description.trim(),
+          category,
+          date: date.trim(),
+          time: time.trim(),
+          location: location.trim(),
+          imageUrl: imageUrl.trim() || undefined,
+          ticketTypes: parsedTicketTypes,
+        });
+        Alert.alert('Evento publicado!', 'Seu evento já está visível para os compradores.');
+        resetForm();
+      }
       navigation.navigate('MyEvents');
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : 'Não foi possível publicar o evento.';
-      Alert.alert('Erro ao publicar', message);
+      const message =
+        err instanceof ApiError
+          ? err.message
+          : `Não foi possível ${isEditing ? 'salvar' : 'publicar'} o evento.`;
+      Alert.alert(`Erro ao ${isEditing ? 'salvar' : 'publicar'}`, message);
     } finally {
       setIsSubmitting(false);
     }
   };
+
+  if (isLoading) {
+    return (
+      <View style={styles.centered}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
+  }
+
+  const needsVerification = !isEditing && currentUser?.role === 'organizer' && !currentUser.isVerified;
+
+  const handleVerify = async () => {
+    if (!verifyCode.trim()) {
+      Alert.alert('Código obrigatório', 'Digite o código enviado para o seu email.');
+      return;
+    }
+    setIsVerifying(true);
+    try {
+      await verifyEmail(verifyCode.trim());
+      setVerifyCode('');
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : 'Não foi possível verificar o código.';
+      Alert.alert('Erro', message);
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
+  const handleResend = async () => {
+    setIsResending(true);
+    try {
+      await resendVerification();
+      Alert.alert('Código reenviado', 'Confira sua caixa de entrada.');
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : 'Não foi possível reenviar o código.';
+      Alert.alert('Erro', message);
+    } finally {
+      setIsResending(false);
+    }
+  };
+
+  if (needsVerification) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.verifyCard}>
+          <Ionicons name="mail-unread-outline" size={40} color={colors.primary} />
+          <Text style={styles.verifyTitle}>Confirme seu email</Text>
+          <Text style={styles.verifyDesc}>
+            Enviamos um código para {currentUser?.email}. Confirme para poder publicar eventos.
+          </Text>
+          <TextInput
+            style={[styles.input, styles.verifyInput]}
+            value={verifyCode}
+            onChangeText={setVerifyCode}
+            placeholder="Código de 6 dígitos"
+            placeholderTextColor="#9CA3AF"
+            keyboardType="number-pad"
+          />
+          <PrimaryButton title="Confirmar" onPress={handleVerify} loading={isVerifying} style={{ width: '100%' }} />
+          <Pressable onPress={handleResend} disabled={isResending} style={{ marginTop: 16 }}>
+            <Text style={[styles.resendText, { color: colors.primary }]}>
+              {isResending ? 'Reenviando...' : 'Reenviar código'}
+            </Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ padding: 20, paddingBottom: 60 }}>
@@ -224,7 +360,7 @@ export default function CreateEventScreen({ navigation }: Props) {
       ))}
 
       <PrimaryButton
-        title="Publicar evento"
+        title={isEditing ? 'Salvar alterações' : 'Publicar evento'}
         onPress={handleSubmit}
         loading={isSubmitting}
         style={{ marginTop: 32 }}
@@ -235,6 +371,12 @@ export default function CreateEventScreen({ navigation }: Props) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
+  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff' },
+  verifyCard: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
+  verifyTitle: { fontSize: 18, fontWeight: '800', color: '#111827', marginTop: 14 },
+  verifyDesc: { fontSize: 13, color: '#6B7280', textAlign: 'center', marginTop: 8, marginBottom: 24, lineHeight: 19 },
+  verifyInput: { width: '100%', textAlign: 'center', letterSpacing: 4, fontSize: 18, marginBottom: 20, marginTop: 0 },
+  resendText: { fontWeight: '700', fontSize: 13 },
   label: { fontSize: 13, fontWeight: '600', color: '#374151', marginBottom: 6, marginTop: 16 },
   input: {
     borderWidth: 1,

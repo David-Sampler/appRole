@@ -1,5 +1,6 @@
 export type UserRole = 'organizer' | 'buyer';
 export type TicketStatus = 'pending_payment' | 'paid' | 'cancelled';
+export type EventStatus = 'active' | 'cancelled';
 
 export interface User {
   id: string;
@@ -7,6 +8,7 @@ export interface User {
   email: string;
   role: UserRole;
   mercadoPagoConnected: boolean;
+  isVerified: boolean;
 }
 
 export interface TicketType {
@@ -28,6 +30,7 @@ export interface Event {
   time: string;
   location: string;
   imageUrl: string;
+  status: EventStatus;
   ticketTypes: TicketType[];
 }
 

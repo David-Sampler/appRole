@@ -1,4 +1,4 @@
-import { MercadoPagoConfig, Preference, Payment, OAuth } from 'mercadopago';
+import { MercadoPagoConfig, Preference, Payment, PaymentRefund, OAuth } from 'mercadopago';
 
 const accessToken = process.env.MERCADOPAGO_ACCESS_TOKEN;
 const clientId = process.env.MERCADOPAGO_CLIENT_ID;
@@ -93,4 +93,13 @@ export async function getPayment(paymentId) {
   }
   const payment = new Payment(platformClient);
   return payment.get({ id: paymentId });
+}
+
+export async function refundPayment(paymentId, sellerAccessToken) {
+  if (!sellerAccessToken) {
+    throw new Error('Organizador não conectou uma conta de pagamento.');
+  }
+  const sellerClient = new MercadoPagoConfig({ accessToken: sellerAccessToken });
+  const refund = new PaymentRefund(sellerClient);
+  return refund.total({ payment_id: paymentId });
 }

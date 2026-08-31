@@ -5,6 +5,7 @@ export function toPublicUser(user) {
     email: user.email,
     role: user.role,
     mercadoPagoConnected: Boolean(user.mpAccessToken),
+    isVerified: user.isVerified,
   };
 }
 
@@ -20,6 +21,7 @@ export function toPublicEvent(event) {
     time: event.time,
     location: event.location,
     imageUrl: event.imageUrl,
+    status: event.status,
     ticketTypes: event.ticketTypes.map((tt) => ({
       id: tt._id.toString(),
       name: tt.name,

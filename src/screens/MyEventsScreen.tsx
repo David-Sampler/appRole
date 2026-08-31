@@ -42,6 +42,7 @@ function formatDate(dateStr: string) {
 export default function MyEventsScreen({ navigation }: Props) {
   const colors = useThemeStore((s) => s.colors);
   const mercadoPagoConnected = useAuthStore((s) => s.user?.mercadoPagoConnected);
+  const isVerified = useAuthStore((s) => s.user?.isVerified);
   const [events, setEvents] = useState<Event[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -82,6 +83,14 @@ export default function MyEventsScreen({ navigation }: Props) {
 
   return (
     <View style={styles.container}>
+      {isVerified === false && (
+        <Pressable style={styles.banner} onPress={() => navigation.navigate('CreateEvent')}>
+          <Ionicons name="mail-unread-outline" size={18} color="#B45309" />
+          <Text style={styles.bannerText}>
+            Confirme seu email de organizador para poder publicar eventos. Toque para verificar.
+          </Text>
+        </Pressable>
+      )}
       {mercadoPagoConnected === false && (
         <Pressable
           style={styles.banner}
@@ -127,7 +136,14 @@ export default function MyEventsScreen({ navigation }: Props) {
             >
               <Image source={{ uri: item.imageUrl }} style={styles.image} />
               <View style={styles.body}>
-                <Text style={styles.title}>{item.title}</Text>
+                <View style={styles.titleRow}>
+                  <Text style={styles.title}>{item.title}</Text>
+                  {item.status === 'cancelled' && (
+                    <View style={styles.cancelledBadge}>
+                      <Text style={styles.cancelledBadgeText}>Cancelado</Text>
+                    </View>
+                  )}
+                </View>
                 <Text style={styles.date}>{formatDate(item.date)} · {item.location}</Text>
 
                 <View style={styles.progressBar}>
@@ -186,7 +202,10 @@ const styles = StyleSheet.create({
   },
   image: { width: 100, height: '100%', backgroundColor: '#E5E7EB' },
   body: { flex: 1, padding: 14 },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   title: { fontSize: 15, fontWeight: '700', color: '#111827' },
+  cancelledBadge: { backgroundColor: '#FEE2E2', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2 },
+  cancelledBadgeText: { fontSize: 10, fontWeight: '700', color: '#DC2626' },
   date: { fontSize: 12, color: '#6B7280', marginTop: 2 },
   progressBar: {
     height: 6,

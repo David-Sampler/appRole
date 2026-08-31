@@ -7,7 +7,7 @@ import { createPaymentPreference, isPaymentsConfigured } from '../utils/mercadop
 
 export async function listEvents(req, res) {
   const { search, category } = req.query;
-  const filter = {};
+  const filter = { status: 'active' };
   if (category) filter.category = category;
   if (search) {
     filter.$or = [
@@ -58,6 +58,12 @@ export async function eventBuyers(req, res) {
 }
 
 export async function createEvent(req, res) {
+  if (!req.user.isVerified) {
+    return res.status(403).json({
+      message: 'Confirme seu email de organizador antes de publicar um evento.',
+    });
+  }
+
   const { title, description, category, date, time, location, imageUrl, ticketTypes } = req.body;
 
   if (!title || !description || !category || !date || !time || !location) {
@@ -94,6 +100,79 @@ export async function createEvent(req, res) {
   });
 
   res.status(201).json({ event: toPublicEvent(event) });
+}
+
+export async function updateEvent(req, res) {
+  const event = await Event.findById(req.params.id);
+  if (!event) return res.status(404).json({ message: 'Evento não encontrado.' });
+  if (event.organizer.toString() !== req.user._id.toString()) {
+    return res.status(403).json({ message: 'Você não é o organizador deste evento.' });
+  }
+  if (event.status === 'cancelled') {
+    return res.status(409).json({ message: 'Este evento foi cancelado e não pode ser editado.' });
+  }
+
+  const { title, description, category, date, time, location, imageUrl, ticketTypes } = req.body;
+
+  if (!title || !description || !category || !date || !time || !location) {
+    return res.status(400).json({ message: 'Preencha todos os campos do evento.' });
+  }
+  if (!Array.isArray(ticketTypes) || ticketTypes.length === 0) {
+    return res.status(400).json({ message: 'Adicione pelo menos um tipo de ingresso.' });
+  }
+
+  const existingTypesById = new Map(event.ticketTypes.map((tt) => [tt._id.toString(), tt]));
+  const nextTicketTypes = [];
+  for (const tt of ticketTypes) {
+    if (!tt.name || typeof tt.price !== 'number' || tt.price < 0) {
+      return res.status(400).json({ message: 'Tipo de ingresso inválido.' });
+    }
+    if (!Number.isInteger(tt.quantityAvailable) || tt.quantityAvailable <= 0) {
+      return res.status(400).json({ message: 'Quantidade de ingresso inválida.' });
+    }
+
+    const existing = tt.id ? existingTypesById.get(tt.id) : null;
+    const quantitySold = existing?.quantitySold ?? 0;
+    if (tt.quantityAvailable < quantitySold) {
+      return res.status(400).json({
+        message: `A quantidade de "${tt.name}" não pode ser menor que ${quantitySold} (já vendidos).`,
+      });
+    }
+
+    nextTicketTypes.push(
+      existing
+        ? { _id: existing._id, name: tt.name, price: tt.price, quantityAvailable: tt.quantityAvailable, quantitySold }
+        : { name: tt.name, price: tt.price, quantityAvailable: tt.quantityAvailable, quantitySold: 0 }
+    );
+  }
+
+  event.title = title;
+  event.description = description;
+  event.category = category;
+  event.date = date;
+  event.time = time;
+  event.location = location;
+  event.imageUrl = imageUrl || event.imageUrl;
+  event.ticketTypes = nextTicketTypes;
+
+  await event.save();
+  res.json({ event: toPublicEvent(event) });
+}
+
+export async function cancelEvent(req, res) {
+  const event = await Event.findById(req.params.id);
+  if (!event) return res.status(404).json({ message: 'Evento não encontrado.' });
+  if (event.organizer.toString() !== req.user._id.toString()) {
+    return res.status(403).json({ message: 'Você não é o organizador deste evento.' });
+  }
+  if (event.status === 'cancelled') {
+    return res.status(409).json({ message: 'Este evento já está cancelado.' });
+  }
+
+  event.status = 'cancelled';
+  await event.save();
+
+  res.json({ event: toPublicEvent(event) });
 }
 
 function generateTicketCode() {

@@ -4,6 +4,8 @@ import {
   getEvent,
   myEvents,
   createEvent,
+  updateEvent,
+  cancelEvent,
   purchaseTicket,
   guestPurchase,
   eventBuyers,
@@ -23,6 +25,8 @@ router.get(
   asyncHandler(eventBuyers)
 );
 router.post('/', requireAuth, requireRole('organizer'), asyncHandler(createEvent));
+router.put('/:id', requireAuth, requireRole('organizer'), asyncHandler(updateEvent));
+router.patch('/:id/cancel', requireAuth, requireRole('organizer'), asyncHandler(cancelEvent));
 router.post(
   '/:id/purchase',
   requireAuth,

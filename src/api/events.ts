@@ -32,6 +32,25 @@ export function createEvent(input: CreateEventInput) {
   return request<{ event: Event }>('/events', { method: 'POST', body: input });
 }
 
+export interface UpdateEventInput {
+  title: string;
+  description: string;
+  category: string;
+  date: string;
+  time: string;
+  location: string;
+  imageUrl?: string;
+  ticketTypes: { id?: string; name: string; price: number; quantityAvailable: number }[];
+}
+
+export function updateEvent(eventId: string, input: UpdateEventInput) {
+  return request<{ event: Event }>(`/events/${eventId}`, { method: 'PUT', body: input });
+}
+
+export function cancelEvent(eventId: string) {
+  return request<{ event: Event }>(`/events/${eventId}/cancel`, { method: 'PATCH' });
+}
+
 export function purchaseTicket(eventId: string, ticketTypeId: string, quantity: number) {
   return request<{ ticket: import('../types').PurchasedTicket; checkoutUrl: string }>(
     `/events/${eventId}/purchase`,

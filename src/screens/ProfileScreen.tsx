@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { View, Text, StyleSheet, Pressable, Alert } from 'react-native';
+import { View, Text, StyleSheet, Pressable, Alert, TextInput } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as WebBrowser from 'expo-web-browser';
 import { useFocusEffect } from '@react-navigation/native';
@@ -16,7 +16,57 @@ export default function ProfileScreen() {
   const currentUser = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   const refreshUser = useAuthStore((s) => s.refreshUser);
+  const updateProfile = useAuthStore((s) => s.updateProfile);
   const [isConnecting, setIsConnecting] = useState(false);
+
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+
+  const openEditProfile = () => {
+    setEditName(currentUser?.name ?? '');
+    setEditEmail(currentUser?.email ?? '');
+    setCurrentPassword('');
+    setNewPassword('');
+    setConfirmPassword('');
+    setIsEditingProfile(true);
+  };
+
+  const handleSaveProfile = async () => {
+    if (!editName.trim() || !editEmail.trim()) {
+      Alert.alert('Campos obrigatórios', 'Preencha nome e email.');
+      return;
+    }
+    if (newPassword && newPassword !== confirmPassword) {
+      Alert.alert('Senhas diferentes', 'A nova senha e a confirmação não coincidem.');
+      return;
+    }
+    if (newPassword && newPassword.length < 6) {
+      Alert.alert('Senha inválida', 'A nova senha deve ter pelo menos 6 caracteres.');
+      return;
+    }
+
+    setIsSavingProfile(true);
+    try {
+      await updateProfile({
+        name: editName.trim(),
+        email: editEmail.trim(),
+        currentPassword: newPassword ? currentPassword : undefined,
+        newPassword: newPassword || undefined,
+      });
+      setIsEditingProfile(false);
+      Alert.alert('Perfil atualizado', 'Suas informações foram salvas.');
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : 'Não foi possível salvar as alterações.';
+      Alert.alert('Erro', message);
+    } finally {
+      setIsSavingProfile(false);
+    }
+  };
 
   useFocusEffect(
     useCallback(() => {
@@ -55,6 +105,69 @@ export default function ProfileScreen() {
           {currentUser?.role === 'organizer' ? 'Organizador' : 'Comprador'}
         </Text>
       </View>
+
+      {!isEditingProfile ? (
+        <Pressable style={[styles.editProfileButton, { borderColor: colors.primary }]} onPress={openEditProfile}>
+          <Ionicons name="pencil-outline" size={16} color={colors.primary} />
+          <Text style={[styles.editProfileButtonText, { color: colors.primary }]}>Editar perfil</Text>
+        </Pressable>
+      ) : (
+        <View style={styles.editCard}>
+          <Text style={styles.editCardTitle}>Editar perfil</Text>
+
+          <Text style={styles.editLabel}>Nome</Text>
+          <TextInput style={styles.editInput} value={editName} onChangeText={setEditName} placeholderTextColor="#9CA3AF" />
+
+          <Text style={styles.editLabel}>Email</Text>
+          <TextInput
+            style={styles.editInput}
+            value={editEmail}
+            onChangeText={setEditEmail}
+            autoCapitalize="none"
+            keyboardType="email-address"
+            placeholderTextColor="#9CA3AF"
+          />
+
+          <Text style={styles.editSectionTitle}>Alterar senha (opcional)</Text>
+          <Text style={styles.editLabel}>Senha atual</Text>
+          <TextInput
+            style={styles.editInput}
+            value={currentPassword}
+            onChangeText={setCurrentPassword}
+            secureTextEntry
+            placeholderTextColor="#9CA3AF"
+          />
+          <Text style={styles.editLabel}>Nova senha</Text>
+          <TextInput
+            style={styles.editInput}
+            value={newPassword}
+            onChangeText={setNewPassword}
+            secureTextEntry
+            placeholderTextColor="#9CA3AF"
+          />
+          <Text style={styles.editLabel}>Confirmar nova senha</Text>
+          <TextInput
+            style={styles.editInput}
+            value={confirmPassword}
+            onChangeText={setConfirmPassword}
+            secureTextEntry
+            placeholderTextColor="#9CA3AF"
+          />
+
+          <View style={styles.editActionsRow}>
+            <Pressable
+              style={styles.editCancelButton}
+              onPress={() => setIsEditingProfile(false)}
+              disabled={isSavingProfile}
+            >
+              <Text style={styles.editCancelText}>Cancelar</Text>
+            </Pressable>
+            <View style={{ flex: 1 }}>
+              <PrimaryButton title="Salvar" onPress={handleSaveProfile} loading={isSavingProfile} />
+            </View>
+          </View>
+        </View>
+      )}
 
       {currentUser?.role === 'organizer' && (
         <View style={styles.paymentCard}>
@@ -135,6 +248,40 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   roleText: { fontWeight: '600', fontSize: 13 },
+  editProfileButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: 1.5,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    marginTop: 16,
+  },
+  editProfileButtonText: { fontWeight: '700', fontSize: 13 },
+  editCard: {
+    width: '85%',
+    backgroundColor: '#F9FAFB',
+    borderRadius: 16,
+    padding: 18,
+    marginTop: 20,
+  },
+  editCardTitle: { fontSize: 14, fontWeight: '700', color: '#111827', marginBottom: 4 },
+  editSectionTitle: { fontSize: 12, fontWeight: '700', color: '#6B7280', marginTop: 18, marginBottom: 2 },
+  editLabel: { fontSize: 12, fontWeight: '600', color: '#374151', marginTop: 10, marginBottom: 4 },
+  editInput: {
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: '#111827',
+    backgroundColor: '#fff',
+  },
+  editActionsRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 18 },
+  editCancelButton: { paddingHorizontal: 14, paddingVertical: 12 },
+  editCancelText: { color: '#6B7280', fontWeight: '600', fontSize: 13 },
   paymentCard: {
     width: '85%',
     backgroundColor: '#F9FAFB',

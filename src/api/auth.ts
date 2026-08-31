@@ -31,6 +31,25 @@ export function me() {
   return request<{ user: User }>('/auth/me');
 }
 
+export interface UpdateProfileInput {
+  name?: string;
+  email?: string;
+  currentPassword?: string;
+  newPassword?: string;
+}
+
+export function updateProfile(input: UpdateProfileInput) {
+  return request<{ user: User }>('/auth/me', { method: 'PATCH', body: input });
+}
+
+export function verifyEmail(code: string) {
+  return request<{ user: User }>('/auth/verify-email', { method: 'POST', body: { code } });
+}
+
+export function resendVerification() {
+  return request<{ message: string }>('/auth/resend-verification', { method: 'POST' });
+}
+
 export function forgotPassword(email: string) {
   return request<{ message: string }>('/auth/forgot-password', {
     method: 'POST',

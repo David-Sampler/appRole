@@ -5,7 +5,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import * as Clipboard from 'expo-clipboard';
 import { OrganizerStackParamList } from '../navigation/types';
-import { getEvent, eventBuyers, EventBuyer } from '../api/events';
+import { getEvent, eventBuyers, cancelEvent, EventBuyer } from '../api/events';
 import { ApiError } from '../api/client';
 import { eventCheckoutUrl } from '../utils/publicUrl';
 import { Event } from '../types';
@@ -30,6 +30,7 @@ export default function OrganizerEventDetailScreen({ route, navigation }: Props)
   const [buyers, setBuyers] = useState<EventBuyer[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isCancelling, setIsCancelling] = useState(false);
 
   const fetchData = useCallback(async () => {
     setIsLoading(true);
@@ -72,13 +73,47 @@ export default function OrganizerEventDetailScreen({ route, navigation }: Props)
 
   const totalRevenue = event.ticketTypes.reduce((sum, tt) => sum + tt.quantitySold * tt.price, 0);
   const totalSold = event.ticketTypes.reduce((sum, tt) => sum + tt.quantitySold, 0);
+  const isCancelled = event.status === 'cancelled';
+
+  const handleCancelEvent = () => {
+    Alert.alert(
+      'Cancelar evento',
+      'Tem certeza que deseja cancelar este evento? Ele deixará de aparecer para compradores.',
+      [
+        { text: 'Voltar', style: 'cancel' },
+        {
+          text: 'Cancelar evento',
+          style: 'destructive',
+          onPress: async () => {
+            setIsCancelling(true);
+            try {
+              const { event: updated } = await cancelEvent(event.id);
+              setEvent(updated);
+            } catch (err) {
+              const message = err instanceof ApiError ? err.message : 'Não foi possível cancelar o evento.';
+              Alert.alert('Erro', message);
+            } finally {
+              setIsCancelling(false);
+            }
+          },
+        },
+      ]
+    );
+  };
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 40 }}>
       <Image source={{ uri: event.imageUrl }} style={styles.image} />
 
       <View style={styles.body}>
-        <Text style={[styles.category, { color: colors.primary }]}>{event.category}</Text>
+        <View style={styles.categoryRow}>
+          <Text style={[styles.category, { color: colors.primary }]}>{event.category}</Text>
+          {isCancelled && (
+            <View style={styles.cancelledBadge}>
+              <Text style={styles.cancelledBadgeText}>Evento cancelado</Text>
+            </View>
+          )}
+        </View>
         <Text style={styles.title}>{event.title}</Text>
 
         <View style={styles.infoRow}>
@@ -137,6 +172,32 @@ export default function OrganizerEventDetailScreen({ route, navigation }: Props)
             <Text style={[styles.shareButtonText, { color: colors.primary }]}>Copiar link</Text>
           </Pressable>
         </View>
+
+        {!isCancelled && (
+          <View style={styles.shareRow}>
+            <Pressable
+              style={[styles.shareButton, { borderColor: colors.primary }]}
+              onPress={() => navigation.navigate('CreateEvent', { eventId: event.id })}
+            >
+              <Ionicons name="create-outline" size={18} color={colors.primary} />
+              <Text style={[styles.shareButtonText, { color: colors.primary }]}>Editar evento</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.shareButton, styles.cancelButton]}
+              onPress={handleCancelEvent}
+              disabled={isCancelling}
+            >
+              {isCancelling ? (
+                <ActivityIndicator size="small" color="#DC2626" />
+              ) : (
+                <>
+                  <Ionicons name="close-circle-outline" size={18} color="#DC2626" />
+                  <Text style={[styles.shareButtonText, { color: '#DC2626' }]}>Cancelar evento</Text>
+                </>
+              )}
+            </Pressable>
+          </View>
+        )}
 
         <Text style={styles.sectionTitle}>Ingressos por tipo</Text>
         {event.ticketTypes.map((tt) => {
@@ -203,7 +264,15 @@ const styles = StyleSheet.create({
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   image: { width: '100%', height: 200, backgroundColor: '#E5E7EB' },
   body: { padding: 20 },
+  categoryRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   category: { fontSize: 12, fontWeight: '700', textTransform: 'uppercase' },
+  cancelledBadge: {
+    backgroundColor: '#FEE2E2',
+    borderRadius: 20,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  cancelledBadgeText: { fontSize: 11, fontWeight: '700', color: '#DC2626' },
   title: { fontSize: 22, fontWeight: '800', color: '#111827', marginTop: 4 },
   infoRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10 },
   infoText: { fontSize: 14, color: '#374151' },
@@ -239,6 +308,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   shareButtonText: { fontSize: 13, fontWeight: '700' },
+  cancelButton: { borderColor: '#DC2626' },
   sectionTitle: { fontSize: 16, fontWeight: '700', color: '#111827', marginTop: 28, marginBottom: 8 },
   ticketTypeCard: {
     flexDirection: 'row',

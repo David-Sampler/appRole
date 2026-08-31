@@ -23,6 +23,25 @@ export async function sendPasswordResetEmail(email, code) {
   });
 }
 
+export async function sendVerificationEmail(email, code) {
+  if (!resend) {
+    throw new Error('Envio de email não configurado no servidor.');
+  }
+  await resend.emails.send({
+    from: fromAddress,
+    to: email,
+    subject: 'Confirme seu email de organizador — Rolê',
+    html: `
+      <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+        <h2 style="color:#7C3AED;">Rolê</h2>
+        <p>Use o código abaixo para confirmar seu email e liberar a criação de eventos. Ele expira em 30 minutos.</p>
+        <p style="font-size: 32px; font-weight: 800; letter-spacing: 6px; color: #111827;">${code}</p>
+        <p style="color:#6B7280; font-size: 13px;">Se você não criou uma conta de organizador na Rolê, pode ignorar este email.</p>
+      </div>
+    `,
+  });
+}
+
 export async function sendTicketConfirmationEmail(email, { event, ticketTypeName, quantity, totalPaid, code }) {
   if (!resend) return; // não bloqueia a compra se o email não estiver configurado
   const ticketUrl = `${publicBaseUrl}/t/${code}`;

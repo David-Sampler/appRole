@@ -18,7 +18,7 @@ export type BuyerTabParamList = {
 
 export type OrganizerStackParamList = {
   MyEvents: undefined;
-  CreateEvent: undefined;
+  CreateEvent: { eventId?: string } | undefined;
   OrganizerEventDetail: { eventId: string };
   CheckInScanner: { eventId: string };
 };

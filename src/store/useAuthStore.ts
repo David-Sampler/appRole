@@ -18,6 +18,9 @@ interface AuthState {
   forgotPassword: (email: string) => Promise<void>;
   resetPassword: (email: string, code: string, newPassword: string) => Promise<void>;
   refreshUser: () => Promise<void>;
+  updateProfile: (input: authApi.UpdateProfileInput) => Promise<void>;
+  verifyEmail: (code: string) => Promise<void>;
+  resendVerification: () => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -105,6 +108,30 @@ export const useAuthStore = create<AuthState>((set) => ({
     } catch {
       // ignora falha silenciosa de refresh
     }
+  },
+
+  updateProfile: async (input) => {
+    set({ isSubmitting: true });
+    try {
+      const { user } = await authApi.updateProfile(input);
+      set({ user });
+    } finally {
+      set({ isSubmitting: false });
+    }
+  },
+
+  verifyEmail: async (code) => {
+    set({ isSubmitting: true });
+    try {
+      const { user } = await authApi.verifyEmail(code);
+      set({ user });
+    } finally {
+      set({ isSubmitting: false });
+    }
+  },
+
+  resendVerification: async () => {
+    await authApi.resendVerification();
   },
 
   logout: async () => {

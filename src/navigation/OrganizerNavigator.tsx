@@ -20,7 +20,7 @@ function MyEventsStackScreen() {
       <Stack.Screen
         name="CreateEvent"
         component={CreateEventScreen}
-        options={{ title: 'Criar Evento' }}
+        options={({ route }) => ({ title: route.params?.eventId ? 'Editar Evento' : 'Criar Evento' })}
       />
       <Stack.Screen
         name="OrganizerEventDetail"

@@ -21,3 +21,7 @@ export function checkInTicket(code: string) {
     body: { code },
   });
 }
+
+export function cancelTicket(ticketId: string) {
+  return request<{ ticket: PurchasedTicket }>(`/tickets/${ticketId}/cancel`, { method: 'POST' });
+}

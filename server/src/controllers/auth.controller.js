@@ -3,9 +3,14 @@ import { OAuth2Client } from 'google-auth-library';
 import User from '../models/User.js';
 import { signToken } from '../utils/jwt.js';
 import { toPublicUser } from '../utils/serialize.js';
-import { sendPasswordResetEmail } from '../utils/mailer.js';
+import { sendPasswordResetEmail, sendVerificationEmail } from '../utils/mailer.js';
 
 const RESET_CODE_TTL_MS = 15 * 60 * 1000;
+const VERIFY_CODE_TTL_MS = 30 * 60 * 1000;
+
+function generateVerificationCode() {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
 
 const googleClientIds = (process.env.GOOGLE_CLIENT_IDS || '')
   .split(',')
@@ -26,7 +31,26 @@ export async function register(req, res) {
     return res.status(409).json({ message: 'Já existe uma conta com este email.' });
   }
   const passwordHash = await bcrypt.hash(password, 10);
-  const user = await User.create({ name, email: email.toLowerCase(), passwordHash, role });
+  const user = await User.create({
+    name,
+    email: email.toLowerCase(),
+    passwordHash,
+    role,
+    isVerified: role === 'organizer' ? false : true,
+  });
+
+  if (role === 'organizer') {
+    const code = generateVerificationCode();
+    user.verifyCode = code;
+    user.verifyCodeExpiresAt = new Date(Date.now() + VERIFY_CODE_TTL_MS);
+    await user.save();
+    try {
+      await sendVerificationEmail(user.email, code);
+    } catch {
+      // não bloqueia o cadastro se o email de verificação falhar; o organizador pode reenviar depois
+    }
+  }
+
   const token = signToken(user);
   res.status(201).json({ token, user: toPublicUser(user) });
 }
@@ -89,6 +113,90 @@ export async function googleAuth(req, res) {
 
 export async function me(req, res) {
   res.json({ user: toPublicUser(req.user) });
+}
+
+export async function updateProfile(req, res) {
+  const { name, email, currentPassword, newPassword } = req.body;
+  const user = req.user;
+
+  if (name !== undefined) {
+    if (!name.trim()) {
+      return res.status(400).json({ message: 'O nome não pode ficar vazio.' });
+    }
+    user.name = name.trim();
+  }
+
+  if (email !== undefined && email.toLowerCase() !== user.email) {
+    const existing = await User.findOne({ email: email.toLowerCase() });
+    if (existing) {
+      return res.status(409).json({ message: 'Já existe uma conta com este email.' });
+    }
+    user.email = email.toLowerCase();
+  }
+
+  if (newPassword !== undefined) {
+    if (newPassword.length < 6) {
+      return res.status(400).json({ message: 'A nova senha deve ter pelo menos 6 caracteres.' });
+    }
+    if (user.passwordHash) {
+      if (!currentPassword) {
+        return res.status(400).json({ message: 'Informe a senha atual para definir uma nova.' });
+      }
+      const valid = await bcrypt.compare(currentPassword, user.passwordHash);
+      if (!valid) {
+        return res.status(401).json({ message: 'Senha atual incorreta.' });
+      }
+    }
+    user.passwordHash = await bcrypt.hash(newPassword, 10);
+  }
+
+  await user.save();
+  res.json({ user: toPublicUser(user) });
+}
+
+export async function resendVerification(req, res) {
+  const user = req.user;
+  if (user.isVerified) {
+    return res.status(409).json({ message: 'Este email já foi verificado.' });
+  }
+
+  const code = generateVerificationCode();
+  user.verifyCode = code;
+  user.verifyCodeExpiresAt = new Date(Date.now() + VERIFY_CODE_TTL_MS);
+  await user.save();
+
+  try {
+    await sendVerificationEmail(user.email, code);
+  } catch (err) {
+    return res.status(500).json({ message: err.message || 'Não foi possível enviar o email.' });
+  }
+
+  res.json({ message: 'Código de verificação reenviado.' });
+}
+
+export async function verifyEmail(req, res) {
+  const { code } = req.body;
+  const user = req.user;
+
+  if (user.isVerified) {
+    return res.json({ user: toPublicUser(user) });
+  }
+  if (
+    !code ||
+    !user.verifyCode ||
+    user.verifyCode !== code ||
+    !user.verifyCodeExpiresAt ||
+    user.verifyCodeExpiresAt.getTime() < Date.now()
+  ) {
+    return res.status(400).json({ message: 'Código inválido ou expirado.' });
+  }
+
+  user.isVerified = true;
+  user.verifyCode = undefined;
+  user.verifyCodeExpiresAt = undefined;
+  await user.save();
+
+  res.json({ user: toPublicUser(user) });
 }
 
 export async function forgotPassword(req, res) {
