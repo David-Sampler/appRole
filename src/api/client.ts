@@ -37,3 +37,24 @@ export async function request<T>(
 
   return data as T;
 }
+
+export async function uploadFile<T>(path: string, fieldName: string, file: { uri: string; name: string; type: string }): Promise<T> {
+  const formData = new FormData();
+  formData.append(fieldName, file as unknown as Blob);
+
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    method: 'POST',
+    headers: {
+      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+    },
+    body: formData,
+  });
+
+  const data = await res.json().catch(() => ({}));
+
+  if (!res.ok) {
+    throw new ApiError(data.message ?? 'Erro inesperado no servidor.', res.status, data);
+  }
+
+  return data as T;
+}

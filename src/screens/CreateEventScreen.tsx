@@ -8,12 +8,15 @@ import {
   Pressable,
   Alert,
   ActivityIndicator,
+  Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { OrganizerStackParamList } from '../navigation/types';
 import { createEvent as createEventApi, updateEvent as updateEventApi, getEvent } from '../api/events';
+import { uploadEventImage } from '../api/uploads';
 import { ApiError } from '../api/client';
 import { CATEGORIES } from '../data/categories';
 import PrimaryButton from '../components/PrimaryButton';
@@ -51,6 +54,7 @@ export default function CreateEventScreen({ navigation, route }: Props) {
   const [time, setTime] = useState('');
   const [location, setLocation] = useState('');
   const [imageUrl, setImageUrl] = useState('');
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [ticketTypes, setTicketTypes] = useState<DraftTicketType[]>([
     { key: '1', name: 'Inteira', price: '', quantity: '' },
   ]);
@@ -120,7 +124,38 @@ export default function CreateEventScreen({ navigation, route }: Props) {
     setTicketTypes([{ key: '1', name: 'Inteira', price: '', quantity: '' }]);
   };
 
+  const handlePickImage = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Permissão necessária', 'Precisamos de acesso às suas fotos pra escolher a imagem do evento.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [16, 9],
+      quality: 0.8,
+    });
+    if (result.canceled || !result.assets[0]) return;
+
+    setIsUploadingImage(true);
+    try {
+      const { url } = await uploadEventImage(result.assets[0].uri);
+      setImageUrl(url);
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : 'Não foi possível enviar a imagem.';
+      Alert.alert('Erro', message);
+    } finally {
+      setIsUploadingImage(false);
+    }
+  };
+
   const handleSubmit = async () => {
+    if (isUploadingImage) {
+      Alert.alert('Aguarde', 'A imagem ainda está sendo enviada.');
+      return;
+    }
     if (!title.trim() || !description.trim() || !date.trim() || !time.trim() || !location.trim()) {
       Alert.alert('Campos obrigatórios', 'Preencha todos os campos do evento.');
       return;
@@ -306,8 +341,28 @@ export default function CreateEventScreen({ navigation, route }: Props) {
       <Text style={styles.label}>Local</Text>
       <TextInput style={styles.input} value={location} onChangeText={setLocation} placeholder="Ex: Arena Music Hall, São Paulo - SP" placeholderTextColor="#9CA3AF" />
 
-      <Text style={styles.label}>URL da imagem (opcional)</Text>
-      <TextInput style={styles.input} value={imageUrl} onChangeText={setImageUrl} placeholder="https://..." placeholderTextColor="#9CA3AF" />
+      <Text style={styles.label}>Imagem de capa</Text>
+      <Pressable style={styles.imagePicker} onPress={handlePickImage} disabled={isUploadingImage}>
+        {imageUrl ? (
+          <Image source={{ uri: imageUrl }} style={styles.imagePreview} />
+        ) : (
+          <View style={styles.imagePlaceholder}>
+            <Ionicons name="image-outline" size={32} color="#9CA3AF" />
+            <Text style={styles.imagePlaceholderText}>Toque para escolher uma foto</Text>
+          </View>
+        )}
+        {isUploadingImage && (
+          <View style={styles.imageUploadingOverlay}>
+            <ActivityIndicator color="#fff" />
+          </View>
+        )}
+        {!!imageUrl && !isUploadingImage && (
+          <View style={styles.imageChangeBadge}>
+            <Ionicons name="camera-outline" size={14} color="#fff" />
+            <Text style={styles.imageChangeBadgeText}>Trocar</Text>
+          </View>
+        )}
+      </Pressable>
 
       <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>Tipos de ingresso</Text>
@@ -363,6 +418,7 @@ export default function CreateEventScreen({ navigation, route }: Props) {
         title={isEditing ? 'Salvar alterações' : 'Publicar evento'}
         onPress={handleSubmit}
         loading={isSubmitting}
+        disabled={isUploadingImage}
         style={{ marginTop: 32 }}
       />
     </ScrollView>
@@ -417,4 +473,35 @@ const styles = StyleSheet.create({
   },
   ticketBlockHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   ticketBlockTitle: { fontSize: 13, fontWeight: '700', color: '#6B7280' },
+  imagePicker: {
+    width: '100%',
+    aspectRatio: 16 / 9,
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: '#F9FAFB',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  imagePreview: { width: '100%', height: '100%' },
+  imagePlaceholder: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 8 },
+  imagePlaceholderText: { fontSize: 13, color: '#9CA3AF' },
+  imageUploadingOverlay: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  imageChangeBadge: {
+    position: 'absolute',
+    right: 10,
+    bottom: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  imageChangeBadgeText: { color: '#fff', fontSize: 12, fontWeight: '700' },
 });

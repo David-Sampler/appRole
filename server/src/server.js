@@ -6,6 +6,7 @@ import authRoutes from './routes/auth.routes.js';
 import eventRoutes from './routes/event.routes.js';
 import ticketRoutes from './routes/ticket.routes.js';
 import paymentRoutes from './routes/payment.routes.js';
+import uploadRoutes from './routes/upload.routes.js';
 import publicRoutes from './routes/public.routes.js';
 
 const app = express();
@@ -19,6 +20,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/events', eventRoutes);
 app.use('/api/tickets', ticketRoutes);
 app.use('/api/payments', paymentRoutes);
+app.use('/api/uploads', uploadRoutes);
 app.use(publicRoutes);
 
 app.use((err, req, res, next) => {

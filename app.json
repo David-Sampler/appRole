@@ -29,6 +29,12 @@
         {
           "cameraPermission": "O Rolê usa a câmera para escanear o QR code dos ingressos na entrada do evento."
         }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "O Rolê usa suas fotos para você escolher a imagem de capa do evento."
+        }
       ]
     ]
   }
