@@ -11,8 +11,9 @@ import {
   RefreshControl,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect } from '@react-navigation/native';
-import { listEvents } from '../api/events';
+import { listEvents, listCities } from '../api/events';
 import { ApiError } from '../api/client';
 import { CATEGORIES } from '../data/categories';
 import { Event } from '../types';
@@ -36,6 +37,8 @@ export default function ExploreScreen({ navigation }: Props) {
   const [events, setEvents] = useState<Event[]>([]);
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState<string | null>(null);
+  const [city, setCity] = useState<string | null>(null);
+  const [cities, setCities] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -47,6 +50,7 @@ export default function ExploreScreen({ navigation }: Props) {
       const { events: fetched } = await listEvents({
         search: query || undefined,
         category: category || undefined,
+        city: city || undefined,
       });
       setEvents(fetched);
     } catch (err) {
@@ -55,7 +59,7 @@ export default function ExploreScreen({ navigation }: Props) {
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  }, [query, category]);
+  }, [query, category, city]);
 
   useFocusEffect(
     useCallback(() => {
@@ -64,9 +68,17 @@ export default function ExploreScreen({ navigation }: Props) {
   );
 
   useEffect(() => {
+    listCities()
+      .then(({ cities: fetched }) => setCities(fetched))
+      .catch(() => {
+        // filtro de cidade fica indisponível se a busca de cidades falhar, sem bloquear a tela
+      });
+  }, []);
+
+  useEffect(() => {
     const timeout = setTimeout(() => fetchEvents(), 300);
     return () => clearTimeout(timeout);
-  }, [query, category]);
+  }, [query, category, city]);
 
   const handleRefresh = () => {
     setIsRefreshing(true);
@@ -111,6 +123,33 @@ export default function ExploreScreen({ navigation }: Props) {
         )}
       />
 
+      {cities.length > 0 && (
+        <FlatList
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          data={cities}
+          keyExtractor={(item) => item}
+          style={styles.cityList}
+          contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}
+          renderItem={({ item }) => (
+            <Pressable
+              style={[
+                styles.cityChip,
+                city === item && { backgroundColor: colors.primaryLight, borderColor: colors.primary },
+              ]}
+              onPress={() => setCity(city === item ? null : item)}
+            >
+              <Ionicons
+                name="location-outline"
+                size={13}
+                color={city === item ? colors.primary : '#6B7280'}
+              />
+              <Text style={[styles.cityChipText, city === item && { color: colors.primary }]}>{item}</Text>
+            </Pressable>
+          )}
+        />
+      )}
+
       {isLoading ? (
         <View style={styles.centered}>
           <ActivityIndicator size="large" color={colors.primary} />
@@ -141,17 +180,23 @@ export default function ExploreScreen({ navigation }: Props) {
               <View style={styles.dateBadge}>
                 <Text style={[styles.dateBadgeText, { color: colors.primary }]}>{formatDate(item.date)}</Text>
               </View>
-              <View style={styles.cardBody}>
-                <Text style={[styles.cardCategory, { color: colors.primary }]}>{item.category}</Text>
-                <Text style={styles.cardTitle}>{item.title}</Text>
-                <View style={styles.cardRow}>
-                  <Ionicons name="location-outline" size={14} color="#6B7280" />
-                  <Text style={styles.cardLocation} numberOfLines={1}>
-                    {item.location}
-                  </Text>
+              <LinearGradient
+                colors={['transparent', 'rgba(0,0,0,0.85)']}
+                locations={[0, 0.7]}
+                style={styles.cardOverlay}
+              >
+                <Text style={styles.cardCategory}>{item.category}</Text>
+                <Text style={styles.cardTitle} numberOfLines={1}>{item.title}</Text>
+                <View style={styles.cardBottomRow}>
+                  <View style={styles.cardRow}>
+                    <Ionicons name="location-outline" size={13} color="#E5E7EB" />
+                    <Text style={styles.cardLocation} numberOfLines={1}>
+                      {item.location}{item.city ? ` · ${item.city}` : ''}
+                    </Text>
+                  </View>
+                  <Text style={styles.cardPrice}>a partir de R$ {lowestPrice(item).toFixed(2)}</Text>
                 </View>
-                <Text style={styles.cardPrice}>a partir de R$ {lowestPrice(item).toFixed(2)}</Text>
-              </View>
+              </LinearGradient>
             </Pressable>
           )}
         />
@@ -187,15 +232,26 @@ const styles = StyleSheet.create({
   },
   categoryChipText: { fontSize: 13, color: '#374151', fontWeight: '600' },
   categoryChipTextSelected: { color: '#fff' },
+  cityList: { marginTop: 8, flexGrow: 0 },
+  cityChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  cityChipText: { fontSize: 12, color: '#374151', fontWeight: '600' },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 8 },
   card: {
-    backgroundColor: '#fff',
     borderRadius: 16,
     overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: '#F0F0F0',
+    backgroundColor: '#E5E7EB',
   },
-  cardImage: { width: '100%', height: 160, backgroundColor: '#E5E7EB' },
+  cardImage: { width: '100%', aspectRatio: 1.9, backgroundColor: '#E5E7EB' },
   dateBadge: {
     position: 'absolute',
     top: 12,
@@ -205,13 +261,23 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
   },
-  dateBadgeText: { fontSize: 12, fontWeight: '700', textTransform: 'capitalize' },
-  cardBody: { padding: 14, gap: 4 },
-  cardCategory: { fontSize: 11, fontWeight: '700', textTransform: 'uppercase' },
-  cardTitle: { fontSize: 17, fontWeight: '700', color: '#111827' },
-  cardRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  cardLocation: { fontSize: 13, color: '#6B7280', flexShrink: 1 },
-  cardPrice: { fontSize: 14, fontWeight: '700', color: '#059669', marginTop: 4 },
+  dateBadgeText: { fontSize: 13, fontWeight: '700', textTransform: 'capitalize' },
+  cardOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 14,
+    paddingTop: 36,
+    paddingBottom: 12,
+    gap: 2,
+  },
+  cardCategory: { fontSize: 12, fontWeight: '700', textTransform: 'uppercase', color: '#E9D5FF' },
+  cardTitle: { fontSize: 20, fontWeight: '800', color: '#fff' },
+  cardBottomRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 6, gap: 8 },
+  cardRow: { flexDirection: 'row', alignItems: 'center', gap: 4, flexShrink: 1 },
+  cardLocation: { fontSize: 14, color: '#E5E7EB', flexShrink: 1 },
+  cardPrice: { fontSize: 15, fontWeight: '700', color: '#fff' },
   empty: { alignItems: 'center', paddingTop: 80, gap: 8 },
   emptyText: { color: '#9CA3AF', fontSize: 14, textAlign: 'center', paddingHorizontal: 30 },
 });

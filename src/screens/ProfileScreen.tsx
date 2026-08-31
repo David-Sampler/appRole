@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { View, Text, StyleSheet, Pressable, Alert, TextInput } from 'react-native';
+import { View, Text, StyleSheet, Pressable, Alert, TextInput, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as WebBrowser from 'expo-web-browser';
 import { useFocusEffect } from '@react-navigation/native';
@@ -11,8 +11,6 @@ import { useThemeStore } from '../store/useThemeStore';
 
 export default function ProfileScreen() {
   const colors = useThemeStore((s) => s.colors);
-  const themeName = useThemeStore((s) => s.themeName);
-  const setTheme = useThemeStore((s) => s.setTheme);
   const currentUser = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   const refreshUser = useAuthStore((s) => s.refreshUser);
@@ -27,13 +25,15 @@ export default function ProfileScreen() {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
 
-  const openEditProfile = () => {
-    setEditName(currentUser?.name ?? '');
-    setEditEmail(currentUser?.email ?? '');
-    setCurrentPassword('');
-    setNewPassword('');
-    setConfirmPassword('');
-    setIsEditingProfile(true);
+  const toggleEditProfile = () => {
+    if (!isEditingProfile) {
+      setEditName(currentUser?.name ?? '');
+      setEditEmail(currentUser?.email ?? '');
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+    }
+    setIsEditingProfile((v) => !v);
   };
 
   const handleSaveProfile = async () => {
@@ -89,154 +89,147 @@ export default function ProfileScreen() {
   };
 
   return (
-    <View style={styles.container}>
-      <View style={[styles.avatar, { backgroundColor: colors.primary }]}>
-        <Text style={styles.avatarText}>{currentUser?.name.charAt(0).toUpperCase()}</Text>
-      </View>
-      <Text style={styles.name}>{currentUser?.name}</Text>
-      <Text style={styles.email}>{currentUser?.email}</Text>
-      <View style={[styles.roleBadge, { backgroundColor: colors.primaryLight }]}>
-        <Ionicons
-          name={currentUser?.role === 'organizer' ? 'megaphone' : 'search'}
-          size={14}
-          color={colors.primary}
-        />
-        <Text style={[styles.roleText, { color: colors.primary }]}>
-          {currentUser?.role === 'organizer' ? 'Organizador' : 'Comprador'}
-        </Text>
+    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      <View style={styles.header}>
+        <View style={[styles.avatar, { backgroundColor: colors.primary }]}>
+          <Text style={styles.avatarText}>{currentUser?.name.charAt(0).toUpperCase()}</Text>
+        </View>
+        <Text style={styles.name}>{currentUser?.name}</Text>
+        <Text style={styles.email}>{currentUser?.email}</Text>
+        <View style={[styles.roleBadge, { backgroundColor: colors.primaryLight }]}>
+          <Ionicons
+            name={currentUser?.role === 'organizer' ? 'megaphone' : 'search'}
+            size={13}
+            color={colors.primary}
+          />
+          <Text style={[styles.roleText, { color: colors.primary }]}>
+            {currentUser?.role === 'organizer' ? 'Organizador' : 'Comprador'}
+          </Text>
+        </View>
       </View>
 
-      {!isEditingProfile ? (
-        <Pressable style={[styles.editProfileButton, { borderColor: colors.primary }]} onPress={openEditProfile}>
-          <Ionicons name="pencil-outline" size={16} color={colors.primary} />
-          <Text style={[styles.editProfileButtonText, { color: colors.primary }]}>Editar perfil</Text>
+      <View style={styles.group}>
+        <Pressable style={styles.row} onPress={toggleEditProfile}>
+          <View style={[styles.rowIcon, { backgroundColor: colors.primaryLight }]}>
+            <Ionicons name="pencil-outline" size={16} color={colors.primary} />
+          </View>
+          <Text style={styles.rowLabel}>Editar perfil</Text>
+          <Ionicons name={isEditingProfile ? 'chevron-up' : 'chevron-down'} size={18} color="#9CA3AF" />
         </Pressable>
-      ) : (
-        <View style={styles.editCard}>
-          <Text style={styles.editCardTitle}>Editar perfil</Text>
 
-          <Text style={styles.editLabel}>Nome</Text>
-          <TextInput style={styles.editInput} value={editName} onChangeText={setEditName} placeholderTextColor="#9CA3AF" />
+        {isEditingProfile && (
+          <View style={styles.editPanel}>
+            <Text style={styles.editLabel}>Nome</Text>
+            <TextInput style={styles.editInput} value={editName} onChangeText={setEditName} placeholderTextColor="#9CA3AF" />
 
-          <Text style={styles.editLabel}>Email</Text>
-          <TextInput
-            style={styles.editInput}
-            value={editEmail}
-            onChangeText={setEditEmail}
-            autoCapitalize="none"
-            keyboardType="email-address"
-            placeholderTextColor="#9CA3AF"
-          />
+            <Text style={styles.editLabel}>Email</Text>
+            <TextInput
+              style={styles.editInput}
+              value={editEmail}
+              onChangeText={setEditEmail}
+              autoCapitalize="none"
+              keyboardType="email-address"
+              placeholderTextColor="#9CA3AF"
+            />
 
-          <Text style={styles.editSectionTitle}>Alterar senha (opcional)</Text>
-          <Text style={styles.editLabel}>Senha atual</Text>
-          <TextInput
-            style={styles.editInput}
-            value={currentPassword}
-            onChangeText={setCurrentPassword}
-            secureTextEntry
-            placeholderTextColor="#9CA3AF"
-          />
-          <Text style={styles.editLabel}>Nova senha</Text>
-          <TextInput
-            style={styles.editInput}
-            value={newPassword}
-            onChangeText={setNewPassword}
-            secureTextEntry
-            placeholderTextColor="#9CA3AF"
-          />
-          <Text style={styles.editLabel}>Confirmar nova senha</Text>
-          <TextInput
-            style={styles.editInput}
-            value={confirmPassword}
-            onChangeText={setConfirmPassword}
-            secureTextEntry
-            placeholderTextColor="#9CA3AF"
-          />
+            <Text style={styles.editSectionTitle}>Alterar senha (opcional)</Text>
+            <Text style={styles.editLabel}>Senha atual</Text>
+            <TextInput
+              style={styles.editInput}
+              value={currentPassword}
+              onChangeText={setCurrentPassword}
+              secureTextEntry
+              placeholderTextColor="#9CA3AF"
+            />
+            <Text style={styles.editLabel}>Nova senha</Text>
+            <TextInput
+              style={styles.editInput}
+              value={newPassword}
+              onChangeText={setNewPassword}
+              secureTextEntry
+              placeholderTextColor="#9CA3AF"
+            />
+            <Text style={styles.editLabel}>Confirmar nova senha</Text>
+            <TextInput
+              style={styles.editInput}
+              value={confirmPassword}
+              onChangeText={setConfirmPassword}
+              secureTextEntry
+              placeholderTextColor="#9CA3AF"
+            />
 
-          <View style={styles.editActionsRow}>
-            <Pressable
-              style={styles.editCancelButton}
-              onPress={() => setIsEditingProfile(false)}
-              disabled={isSavingProfile}
-            >
-              <Text style={styles.editCancelText}>Cancelar</Text>
-            </Pressable>
-            <View style={{ flex: 1 }}>
-              <PrimaryButton title="Salvar" onPress={handleSaveProfile} loading={isSavingProfile} />
+            <View style={styles.editActionsRow}>
+              <Pressable
+                style={styles.editCancelButton}
+                onPress={() => setIsEditingProfile(false)}
+                disabled={isSavingProfile}
+              >
+                <Text style={styles.editCancelText}>Cancelar</Text>
+              </Pressable>
+              <View style={{ flex: 1 }}>
+                <PrimaryButton title="Salvar" onPress={handleSaveProfile} loading={isSavingProfile} />
+              </View>
             </View>
           </View>
-        </View>
-      )}
+        )}
 
-      {currentUser?.role === 'organizer' && (
-        <View style={styles.paymentCard}>
-          <Text style={styles.paymentTitle}>Recebimento</Text>
-          {currentUser.mercadoPagoConnected ? (
-            <View style={styles.connectedRow}>
-              <Ionicons name="checkmark-circle" size={18} color="#059669" />
-              <Text style={styles.connectedText}>Mercado Pago conectado</Text>
+        {currentUser?.role === 'organizer' && (
+          <>
+            <View style={styles.divider} />
+            <View style={styles.row}>
+              <View style={[styles.rowIcon, { backgroundColor: colors.primaryLight }]}>
+                <Ionicons name="card-outline" size={16} color={colors.primary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.rowLabel}>Recebimento</Text>
+                {currentUser.mercadoPagoConnected ? (
+                  <View style={styles.connectedRow}>
+                    <Ionicons name="checkmark-circle" size={13} color="#059669" />
+                    <Text style={styles.connectedText}>Mercado Pago conectado</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.rowSubtext}>Conecte sua conta pra receber pelos ingressos</Text>
+                )}
+              </View>
+              {!currentUser.mercadoPagoConnected && (
+                <Pressable
+                  style={[styles.connectButton, { borderColor: colors.primary }]}
+                  onPress={handleConnect}
+                  disabled={isConnecting}
+                >
+                  <Text style={[styles.connectButtonText, { color: colors.primary }]}>
+                    {isConnecting ? '...' : 'Conectar'}
+                  </Text>
+                </Pressable>
+              )}
             </View>
-          ) : (
-            <>
-              <Text style={styles.paymentDesc}>
-                Conecte sua conta do Mercado Pago para receber diretamente pelos ingressos vendidos.
-              </Text>
-              <PrimaryButton
-                title="Conectar Mercado Pago"
-                onPress={handleConnect}
-                loading={isConnecting}
-              />
-            </>
-          )}
-        </View>
-      )}
-
-      <View style={styles.themeCard}>
-        <Text style={styles.themeTitle}>Tema</Text>
-        <View style={styles.themeRow}>
-          <Pressable
-            style={[
-              styles.themeOption,
-              themeName === 'purple' && { borderColor: colors.primary, backgroundColor: colors.primaryLight },
-            ]}
-            onPress={() => setTheme('purple')}
-          >
-            <View style={[styles.themeSwatch, { backgroundColor: '#7C3AED' }]} />
-            <Text style={styles.themeOptionText}>Roxo</Text>
-          </Pressable>
-          <Pressable
-            style={[
-              styles.themeOption,
-              themeName === 'gray' && { borderColor: colors.primary, backgroundColor: colors.primaryLight },
-            ]}
-            onPress={() => setTheme('gray')}
-          >
-            <View style={[styles.themeSwatch, { backgroundColor: '#282B30' }]} />
-            <Text style={styles.themeOptionText}>Cinza</Text>
-          </Pressable>
-        </View>
+          </>
+        )}
       </View>
 
       <Pressable style={styles.logoutButton} onPress={logout}>
         <Ionicons name="log-out-outline" size={18} color="#EF4444" />
         <Text style={styles.logoutText}>Sair</Text>
       </Pressable>
-    </View>
+
+      <Text style={styles.footerText}>Desenvolvido por David Sampler</Text>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, alignItems: 'center', paddingTop: 60, backgroundColor: '#fff' },
+  container: { flex: 1, backgroundColor: '#F9FAFB' },
+  content: { alignItems: 'center', paddingTop: 48, paddingBottom: 32, paddingHorizontal: 20 },
+  header: { alignItems: 'center' },
   avatar: {
-    width: 88,
-    height: 88,
-    borderRadius: 44,
+    width: 84,
+    height: 84,
+    borderRadius: 42,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatarText: { color: '#fff', fontSize: 32, fontWeight: '800' },
-  name: { fontSize: 20, fontWeight: '700', color: '#111827', marginTop: 16 },
+  avatarText: { color: '#fff', fontSize: 30, fontWeight: '800' },
+  name: { fontSize: 19, fontWeight: '700', color: '#111827', marginTop: 14 },
   email: { fontSize: 13, color: '#6B7280', marginTop: 2 },
   roleBadge: {
     flexDirection: 'row',
@@ -245,28 +238,28 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 16,
-    marginTop: 8,
+    marginTop: 10,
   },
-  roleText: { fontWeight: '600', fontSize: 13 },
-  editProfileButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    borderWidth: 1.5,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    marginTop: 16,
-  },
-  editProfileButtonText: { fontWeight: '700', fontSize: 13 },
-  editCard: {
-    width: '85%',
-    backgroundColor: '#F9FAFB',
+  roleText: { fontWeight: '600', fontSize: 12 },
+  group: {
+    width: '100%',
+    backgroundColor: '#fff',
     borderRadius: 16,
-    padding: 18,
-    marginTop: 20,
+    marginTop: 28,
+    borderWidth: 1,
+    borderColor: '#F0F0F0',
+    overflow: 'hidden',
   },
-  editCardTitle: { fontSize: 14, fontWeight: '700', color: '#111827', marginBottom: 4 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16 },
+  rowIcon: { width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  rowLabel: { flex: 1, fontSize: 14, fontWeight: '700', color: '#111827' },
+  rowSubtext: { fontSize: 12, color: '#9CA3AF', marginTop: 2 },
+  divider: { height: 1, backgroundColor: '#F0F0F0', marginLeft: 60 },
+  connectedRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
+  connectedText: { fontSize: 12, fontWeight: '600', color: '#059669' },
+  connectButton: { borderWidth: 1.5, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6 },
+  connectButtonText: { fontSize: 12, fontWeight: '700' },
+  editPanel: { paddingHorizontal: 16, paddingBottom: 18 },
   editSectionTitle: { fontSize: 12, fontWeight: '700', color: '#6B7280', marginTop: 18, marginBottom: 2 },
   editLabel: { fontSize: 12, fontWeight: '600', color: '#374151', marginTop: 10, marginBottom: 4 },
   editInput: {
@@ -277,53 +270,23 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     fontSize: 14,
     color: '#111827',
-    backgroundColor: '#fff',
+    backgroundColor: '#F9FAFB',
   },
   editActionsRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 18 },
   editCancelButton: { paddingHorizontal: 14, paddingVertical: 12 },
   editCancelText: { color: '#6B7280', fontWeight: '600', fontSize: 13 },
-  paymentCard: {
-    width: '85%',
-    backgroundColor: '#F9FAFB',
-    borderRadius: 16,
-    padding: 18,
-    marginTop: 28,
-  },
-  paymentTitle: { fontSize: 14, fontWeight: '700', color: '#111827', marginBottom: 8 },
-  paymentDesc: { fontSize: 13, color: '#6B7280', lineHeight: 18, marginBottom: 14 },
-  connectedRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  connectedText: { fontSize: 14, fontWeight: '600', color: '#059669' },
-  themeCard: {
-    width: '85%',
-    backgroundColor: '#F9FAFB',
-    borderRadius: 16,
-    padding: 18,
-    marginTop: 20,
-  },
-  themeTitle: { fontSize: 14, fontWeight: '700', color: '#111827', marginBottom: 12 },
-  themeRow: { flexDirection: 'row', gap: 12 },
-  themeOption: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    borderWidth: 1.5,
-    borderColor: '#E5E7EB',
-    borderRadius: 12,
-    padding: 12,
-  },
-  themeSwatch: { width: 20, height: 20, borderRadius: 10 },
-  themeOptionText: { fontSize: 13, fontWeight: '600', color: '#374151' },
   logoutButton: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 8,
-    marginTop: 32,
+    width: '100%',
+    marginTop: 20,
     borderWidth: 1,
     borderColor: '#FCA5A5',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 12,
+    paddingVertical: 14,
+    borderRadius: 14,
   },
   logoutText: { color: '#EF4444', fontWeight: '700', fontSize: 14 },
+  footerText: { color: '#D1D5DB', fontSize: 11, marginTop: 20 },
 });

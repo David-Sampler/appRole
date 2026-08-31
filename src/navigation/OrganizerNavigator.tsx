@@ -1,4 +1,5 @@
 import React from 'react';
+import { View, Pressable } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
@@ -7,6 +8,8 @@ import CreateEventScreen from '../screens/CreateEventScreen';
 import OrganizerEventDetailScreen from '../screens/OrganizerEventDetailScreen';
 import CheckInScannerScreen from '../screens/CheckInScannerScreen';
 import ProfileScreen from '../screens/ProfileScreen';
+import HelpScreen from '../screens/HelpScreen';
+import ThemeToggleButton from '../components/ThemeToggleButton';
 import { useThemeStore } from '../store/useThemeStore';
 import { OrganizerStackParamList, OrganizerTabParamList } from './types';
 
@@ -14,9 +17,26 @@ const Stack = createNativeStackNavigator<OrganizerStackParamList>();
 const Tab = createBottomTabNavigator<OrganizerTabParamList>();
 
 function MyEventsStackScreen() {
+  const primaryColor = useThemeStore((s) => s.colors.primary);
+
   return (
     <Stack.Navigator>
-      <Stack.Screen name="MyEvents" component={MyEventsScreen} options={{ title: 'Meus Eventos' }} />
+      <Stack.Screen
+        name="MyEvents"
+        component={MyEventsScreen}
+        options={({ navigation }) => ({
+          title: 'Meus Eventos',
+          headerRight: () => (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+              <ThemeToggleButton />
+              <Pressable onPress={() => navigation.navigate('Help')} hitSlop={8}>
+                <Ionicons name="help-circle-outline" size={24} color={primaryColor} />
+              </Pressable>
+            </View>
+          ),
+        })}
+      />
+      <Stack.Screen name="Help" component={HelpScreen} options={{ title: 'Como funciona' }} />
       <Stack.Screen
         name="CreateEvent"
         component={CreateEventScreen}

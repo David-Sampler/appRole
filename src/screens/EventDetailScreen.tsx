@@ -190,7 +190,7 @@ export default function EventDetailScreen({ route }: Props) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  image: { width: '100%', height: 220, backgroundColor: '#E5E7EB' },
+  image: { width: '100%', aspectRatio: 16 / 9, backgroundColor: '#E5E7EB' },
   body: { padding: 20 },
   category: { fontSize: 12, fontWeight: '700', textTransform: 'uppercase' },
   title: { fontSize: 22, fontWeight: '800', color: '#111827', marginTop: 4 },

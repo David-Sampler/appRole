@@ -20,6 +20,7 @@ export function toPublicEvent(event) {
     date: event.date,
     time: event.time,
     location: event.location,
+    city: event.city ?? '',
     imageUrl: event.imageUrl,
     status: event.status,
     ticketTypes: event.ticketTypes.map((tt) => ({

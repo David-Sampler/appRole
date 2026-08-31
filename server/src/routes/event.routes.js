@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import {
   listEvents,
+  listCities,
   getEvent,
   myEvents,
   createEvent,
@@ -16,6 +17,7 @@ import { asyncHandler } from '../utils/asyncHandler.js';
 const router = Router();
 
 router.get('/', asyncHandler(listEvents));
+router.get('/cities', asyncHandler(listCities));
 router.get('/mine', requireAuth, requireRole('organizer'), asyncHandler(myEvents));
 router.get('/:id', asyncHandler(getEvent));
 router.get(

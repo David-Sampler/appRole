@@ -262,7 +262,7 @@ export default function OrganizerEventDetailScreen({ route, navigation }: Props)
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  image: { width: '100%', height: 200, backgroundColor: '#E5E7EB' },
+  image: { width: '100%', aspectRatio: 16 / 9, backgroundColor: '#E5E7EB' },
   body: { padding: 20 },
   categoryRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   category: { fontSize: 12, fontWeight: '700', textTransform: 'uppercase' },

@@ -1,3 +1,5 @@
+import { File, UploadType } from 'expo-file-system';
+
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:4000/api';
 
 export class ApiError extends Error {
@@ -38,22 +40,25 @@ export async function request<T>(
   return data as T;
 }
 
-export async function uploadFile<T>(path: string, fieldName: string, file: { uri: string; name: string; type: string }): Promise<T> {
-  const formData = new FormData();
-  formData.append(fieldName, file as unknown as Blob);
-
-  const res = await fetch(`${API_BASE_URL}${path}`, {
-    method: 'POST',
+export async function uploadFile<T>(path: string, fieldName: string, uri: string): Promise<T> {
+  const file = new File(uri);
+  const result = await file.upload(`${API_BASE_URL}${path}`, {
+    uploadType: UploadType.MULTIPART,
+    fieldName,
     headers: {
       ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
     },
-    body: formData,
   });
 
-  const data = await res.json().catch(() => ({}));
+  let data: any = {};
+  try {
+    data = JSON.parse(result.body);
+  } catch {
+    // resposta sem corpo JSON válido
+  }
 
-  if (!res.ok) {
-    throw new ApiError(data.message ?? 'Erro inesperado no servidor.', res.status, data);
+  if (result.status < 200 || result.status >= 300) {
+    throw new ApiError(data.message ?? 'Erro inesperado no servidor.', result.status, data);
   }
 
   return data as T;

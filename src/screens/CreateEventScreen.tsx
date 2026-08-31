@@ -9,9 +9,12 @@ import {
   Alert,
   ActivityIndicator,
   Image,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import * as ImagePicker from 'expo-image-picker';
+import * as Location from 'expo-location';
 import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { OrganizerStackParamList } from '../navigation/types';
@@ -33,6 +36,31 @@ interface DraftTicketType {
   quantity: string;
 }
 
+function toDateKey(d: Date) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function toTimeKey(d: Date) {
+  const h = String(d.getHours()).padStart(2, '0');
+  const min = String(d.getMinutes()).padStart(2, '0');
+  return `${h}:${min}`;
+}
+
+function parseDateKey(key: string) {
+  const [y, m, d] = key.split('-').map(Number);
+  return new Date(y || new Date().getFullYear(), (m || 1) - 1, d || 1);
+}
+
+function parseTimeKey(key: string) {
+  const [h, m] = key.split(':').map(Number);
+  const d = new Date();
+  d.setHours(h || 0, m || 0, 0, 0);
+  return d;
+}
+
 export default function CreateEventScreen({ navigation, route }: Props) {
   const colors = useThemeStore((s) => s.colors);
   const currentUser = useAuthStore((s) => s.user);
@@ -50,9 +78,13 @@ export default function CreateEventScreen({ navigation, route }: Props) {
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState(CATEGORIES[0]);
   const [description, setDescription] = useState('');
-  const [date, setDate] = useState('');
-  const [time, setTime] = useState('');
+  const [dateObj, setDateObj] = useState(new Date());
+  const [timeObj, setTimeObj] = useState(new Date());
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
   const [location, setLocation] = useState('');
+  const [city, setCity] = useState('');
+  const [isLocatingCity, setIsLocatingCity] = useState(false);
   const [imageUrl, setImageUrl] = useState('');
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [ticketTypes, setTicketTypes] = useState<DraftTicketType[]>([
@@ -70,9 +102,10 @@ export default function CreateEventScreen({ navigation, route }: Props) {
           setTitle(event.title);
           setCategory(event.category);
           setDescription(event.description);
-          setDate(event.date);
-          setTime(event.time);
+          setDateObj(parseDateKey(event.date));
+          setTimeObj(parseTimeKey(event.time));
           setLocation(event.location);
+          setCity(event.city);
           setImageUrl(event.imageUrl);
           setTicketTypes(
             event.ticketTypes.map((tt) => ({
@@ -117,9 +150,10 @@ export default function CreateEventScreen({ navigation, route }: Props) {
   const resetForm = () => {
     setTitle('');
     setDescription('');
-    setDate('');
-    setTime('');
+    setDateObj(new Date());
+    setTimeObj(new Date());
     setLocation('');
+    setCity('');
     setImageUrl('');
     setTicketTypes([{ key: '1', name: 'Inteira', price: '', quantity: '' }]);
   };
@@ -144,10 +178,59 @@ export default function CreateEventScreen({ navigation, route }: Props) {
       const { url } = await uploadEventImage(result.assets[0].uri);
       setImageUrl(url);
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : 'Não foi possível enviar a imagem.';
+      console.error('Falha no upload da imagem:', err);
+      const message =
+        err instanceof ApiError
+          ? err.message
+          : err instanceof Error
+          ? `Não foi possível enviar a imagem (${err.message}).`
+          : 'Não foi possível enviar a imagem.';
       Alert.alert('Erro', message);
     } finally {
       setIsUploadingImage(false);
+    }
+  };
+
+  const handleDateChange = (event: DateTimePickerEvent, selected?: Date) => {
+    if (Platform.OS === 'android') {
+      setShowDatePicker(false);
+      if (event.type === 'set' && selected) setDateObj(selected);
+    } else if (selected) {
+      setDateObj(selected);
+    }
+  };
+
+  const handleTimeChange = (event: DateTimePickerEvent, selected?: Date) => {
+    if (Platform.OS === 'android') {
+      setShowTimePicker(false);
+      if (event.type === 'set' && selected) setTimeObj(selected);
+    } else if (selected) {
+      setTimeObj(selected);
+    }
+  };
+
+  const handleUseCurrentLocation = async () => {
+    setIsLocatingCity(true);
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permissão necessária', 'Precisamos da sua localização pra sugerir a cidade.');
+        return;
+      }
+      const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      const [address] = await Location.reverseGeocodeAsync({
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+      });
+      if (address?.city) {
+        setCity(address.region ? `${address.city} - ${address.region}` : address.city);
+      } else {
+        Alert.alert('Não encontramos sua cidade', 'Digite manualmente, por favor.');
+      }
+    } catch {
+      Alert.alert('Erro', 'Não foi possível obter sua localização.');
+    } finally {
+      setIsLocatingCity(false);
     }
   };
 
@@ -156,12 +239,13 @@ export default function CreateEventScreen({ navigation, route }: Props) {
       Alert.alert('Aguarde', 'A imagem ainda está sendo enviada.');
       return;
     }
-    if (!title.trim() || !description.trim() || !date.trim() || !time.trim() || !location.trim()) {
-      Alert.alert('Campos obrigatórios', 'Preencha todos os campos do evento.');
-      return;
-    }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date.trim())) {
-      Alert.alert('Data inválida', 'Use o formato AAAA-MM-DD, ex: 2026-12-25.');
+    const missingFields: string[] = [];
+    if (!title.trim()) missingFields.push('Título do evento');
+    if (!description.trim()) missingFields.push('Descrição');
+    if (!location.trim()) missingFields.push('Local');
+    if (!city.trim()) missingFields.push('Cidade');
+    if (missingFields.length > 0) {
+      Alert.alert('Campos obrigatórios', `Preencha: ${missingFields.join(', ')}.`);
       return;
     }
 
@@ -191,9 +275,10 @@ export default function CreateEventScreen({ navigation, route }: Props) {
           title: title.trim(),
           description: description.trim(),
           category,
-          date: date.trim(),
-          time: time.trim(),
+          date: toDateKey(dateObj),
+          time: toTimeKey(timeObj),
           location: location.trim(),
+          city: city.trim(),
           imageUrl: imageUrl.trim() || undefined,
           ticketTypes: parsedTicketTypes,
         });
@@ -203,9 +288,10 @@ export default function CreateEventScreen({ navigation, route }: Props) {
           title: title.trim(),
           description: description.trim(),
           category,
-          date: date.trim(),
-          time: time.trim(),
+          date: toDateKey(dateObj),
+          time: toTimeKey(timeObj),
           location: location.trim(),
+          city: city.trim(),
           imageUrl: imageUrl.trim() || undefined,
           ticketTypes: parsedTicketTypes,
         });
@@ -329,17 +415,68 @@ export default function CreateEventScreen({ navigation, route }: Props) {
 
       <View style={styles.row}>
         <View style={{ flex: 1 }}>
-          <Text style={styles.label}>Data (AAAA-MM-DD)</Text>
-          <TextInput style={styles.input} value={date} onChangeText={setDate} placeholder="2026-12-25" placeholderTextColor="#9CA3AF" />
+          <Text style={styles.label}>Data</Text>
+          <Pressable style={styles.input} onPress={() => setShowDatePicker(true)}>
+            <Text style={styles.pickerValueText}>
+              {dateObj.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' })}
+            </Text>
+          </Pressable>
         </View>
         <View style={{ flex: 1 }}>
           <Text style={styles.label}>Horário</Text>
-          <TextInput style={styles.input} value={time} onChangeText={setTime} placeholder="20:00" placeholderTextColor="#9CA3AF" />
+          <Pressable style={styles.input} onPress={() => setShowTimePicker(true)}>
+            <Text style={styles.pickerValueText}>
+              {timeObj.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+            </Text>
+          </Pressable>
         </View>
       </View>
 
+      {showDatePicker && (
+        <DateTimePicker
+          value={dateObj}
+          mode="date"
+          display={Platform.OS === 'ios' ? 'inline' : 'default'}
+          onChange={handleDateChange}
+        />
+      )}
+      {Platform.OS === 'ios' && showDatePicker && (
+        <Pressable style={styles.pickerDoneButton} onPress={() => setShowDatePicker(false)}>
+          <Text style={[styles.pickerDoneText, { color: colors.primary }]}>Concluir</Text>
+        </Pressable>
+      )}
+
+      {showTimePicker && (
+        <DateTimePicker
+          value={timeObj}
+          mode="time"
+          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+          onChange={handleTimeChange}
+        />
+      )}
+      {Platform.OS === 'ios' && showTimePicker && (
+        <Pressable style={styles.pickerDoneButton} onPress={() => setShowTimePicker(false)}>
+          <Text style={[styles.pickerDoneText, { color: colors.primary }]}>Concluir</Text>
+        </Pressable>
+      )}
+
       <Text style={styles.label}>Local</Text>
-      <TextInput style={styles.input} value={location} onChangeText={setLocation} placeholder="Ex: Arena Music Hall, São Paulo - SP" placeholderTextColor="#9CA3AF" />
+      <TextInput style={styles.input} value={location} onChangeText={setLocation} placeholder="Ex: Arena Music Hall" placeholderTextColor="#9CA3AF" />
+
+      <View style={styles.cityLabelRow}>
+        <Text style={styles.label}>Cidade</Text>
+        <Pressable style={styles.useLocationButton} onPress={handleUseCurrentLocation} disabled={isLocatingCity}>
+          {isLocatingCity ? (
+            <ActivityIndicator size="small" color={colors.primary} />
+          ) : (
+            <>
+              <Ionicons name="locate-outline" size={14} color={colors.primary} />
+              <Text style={[styles.useLocationText, { color: colors.primary }]}>Usar minha localização</Text>
+            </>
+          )}
+        </Pressable>
+      </View>
+      <TextInput style={styles.input} value={city} onChangeText={setCity} placeholder="Ex: São Paulo - SP" placeholderTextColor="#9CA3AF" />
 
       <Text style={styles.label}>Imagem de capa</Text>
       <Pressable style={styles.imagePicker} onPress={handlePickImage} disabled={isUploadingImage}>
@@ -444,6 +581,12 @@ const styles = StyleSheet.create({
     color: '#111827',
   },
   textArea: { height: 90, textAlignVertical: 'top' },
+  pickerValueText: { fontSize: 15, color: '#111827', textTransform: 'capitalize' },
+  cityLabelRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  useLocationButton: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  useLocationText: { fontSize: 12, fontWeight: '700' },
+  pickerDoneButton: { alignSelf: 'flex-end', paddingVertical: 8, paddingHorizontal: 4 },
+  pickerDoneText: { fontWeight: '700', fontSize: 14 },
   row: { flexDirection: 'row', gap: 12 },
   categoryChip: {
     paddingHorizontal: 14,

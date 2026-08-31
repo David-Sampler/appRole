@@ -29,6 +29,7 @@ export interface Event {
   date: string;
   time: string;
   location: string;
+  city: string;
   imageUrl: string;
   status: EventStatus;
   ticketTypes: TicketType[];

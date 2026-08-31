@@ -8,6 +8,7 @@ export type AuthStackParamList = {
 export type BuyerStackParamList = {
   Explore: undefined;
   EventDetail: { eventId: string };
+  Help: undefined;
 };
 
 export type BuyerTabParamList = {
@@ -21,6 +22,7 @@ export type OrganizerStackParamList = {
   CreateEvent: { eventId?: string } | undefined;
   OrganizerEventDetail: { eventId: string };
   CheckInScanner: { eventId: string };
+  Help: undefined;
 };
 
 export type OrganizerTabParamList = {

@@ -6,17 +6,24 @@ import { toPublicEvent, toPublicTicket } from '../utils/serialize.js';
 import { createPaymentPreference, isPaymentsConfigured } from '../utils/mercadopago.js';
 
 export async function listEvents(req, res) {
-  const { search, category } = req.query;
+  const { search, category, city } = req.query;
   const filter = { status: 'active' };
   if (category) filter.category = category;
+  if (city) filter.city = { $regex: `^${city}$`, $options: 'i' };
   if (search) {
     filter.$or = [
       { title: { $regex: search, $options: 'i' } },
       { location: { $regex: search, $options: 'i' } },
+      { city: { $regex: search, $options: 'i' } },
     ];
   }
   const events = await Event.find(filter).sort({ createdAt: -1 });
   res.json({ events: events.map(toPublicEvent) });
+}
+
+export async function listCities(req, res) {
+  const cities = await Event.distinct('city', { status: 'active', city: { $nin: [null, ''] } });
+  res.json({ cities: cities.sort((a, b) => a.localeCompare(b, 'pt-BR')) });
 }
 
 export async function getEvent(req, res) {
@@ -64,10 +71,10 @@ export async function createEvent(req, res) {
     });
   }
 
-  const { title, description, category, date, time, location, imageUrl, ticketTypes } = req.body;
+  const { title, description, category, date, time, location, city, imageUrl, ticketTypes } = req.body;
 
-  if (!title || !description || !category || !date || !time || !location) {
-    return res.status(400).json({ message: 'Preencha todos os campos do evento.' });
+  if (!title || !description || !category || !date || !time || !location || !city) {
+    return res.status(400).json({ message: 'Preencha todos os campos do evento, incluindo a cidade.' });
   }
   if (!Array.isArray(ticketTypes) || ticketTypes.length === 0) {
     return res.status(400).json({ message: 'Adicione pelo menos um tipo de ingresso.' });
@@ -90,6 +97,7 @@ export async function createEvent(req, res) {
     date,
     time,
     location,
+    city,
     imageUrl: imageUrl || `https://picsum.photos/seed/${Date.now()}/800/500`,
     ticketTypes: ticketTypes.map((tt) => ({
       name: tt.name,
@@ -112,10 +120,10 @@ export async function updateEvent(req, res) {
     return res.status(409).json({ message: 'Este evento foi cancelado e não pode ser editado.' });
   }
 
-  const { title, description, category, date, time, location, imageUrl, ticketTypes } = req.body;
+  const { title, description, category, date, time, location, city, imageUrl, ticketTypes } = req.body;
 
-  if (!title || !description || !category || !date || !time || !location) {
-    return res.status(400).json({ message: 'Preencha todos os campos do evento.' });
+  if (!title || !description || !category || !date || !time || !location || !city) {
+    return res.status(400).json({ message: 'Preencha todos os campos do evento, incluindo a cidade.' });
   }
   if (!Array.isArray(ticketTypes) || ticketTypes.length === 0) {
     return res.status(400).json({ message: 'Adicione pelo menos um tipo de ingresso.' });
@@ -152,6 +160,7 @@ export async function updateEvent(req, res) {
   event.date = date;
   event.time = time;
   event.location = location;
+  event.city = city;
   event.imageUrl = imageUrl || event.imageUrl;
   event.ticketTypes = nextTicketTypes;
 

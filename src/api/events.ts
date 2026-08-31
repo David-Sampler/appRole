@@ -1,12 +1,17 @@
 import { request } from './client';
 import { Event } from '../types';
 
-export function listEvents(params?: { search?: string; category?: string }) {
+export function listEvents(params?: { search?: string; category?: string; city?: string }) {
   const query = new URLSearchParams();
   if (params?.search) query.set('search', params.search);
   if (params?.category) query.set('category', params.category);
+  if (params?.city) query.set('city', params.city);
   const qs = query.toString();
   return request<{ events: Event[] }>(`/events${qs ? `?${qs}` : ''}`);
+}
+
+export function listCities() {
+  return request<{ cities: string[] }>('/events/cities');
 }
 
 export function getEvent(id: string) {
@@ -24,6 +29,7 @@ export interface CreateEventInput {
   date: string;
   time: string;
   location: string;
+  city: string;
   imageUrl?: string;
   ticketTypes: { name: string; price: number; quantityAvailable: number }[];
 }
@@ -39,6 +45,7 @@ export interface UpdateEventInput {
   date: string;
   time: string;
   location: string;
+  city: string;
   imageUrl?: string;
   ticketTypes: { id?: string; name: string; price: number; quantityAvailable: number }[];
 }
