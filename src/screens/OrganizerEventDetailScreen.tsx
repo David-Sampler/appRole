@@ -1,11 +1,11 @@
-import React, { useCallback, useState } from 'react';
-import { View, Text, StyleSheet, Image, ScrollView, ActivityIndicator, Pressable, Share, Alert } from 'react-native';
+import React, { useCallback, useState, useRef, useLayoutEffect } from 'react';
+import { View, Text, StyleSheet, Image, ScrollView, ActivityIndicator, Pressable, Share, Alert, Animated, Dimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import * as Clipboard from 'expo-clipboard';
 import { OrganizerStackParamList } from '../navigation/types';
-import { getEvent, eventBuyers, cancelEvent, EventBuyer } from '../api/events';
+import { getEvent, eventBuyers, cancelEvent, deleteEvent, restoreEvent, purgeEvent, EventBuyer } from '../api/events';
 import { ApiError } from '../api/client';
 import { eventCheckoutUrl } from '../utils/publicUrl';
 import { Event } from '../types';
@@ -31,6 +31,12 @@ export default function OrganizerEventDetailScreen({ route, navigation }: Props)
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isCancelling, setIsCancelling] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isRestoring, setIsRestoring] = useState(false);
+  const [imageHidden, setImageHidden] = useState(false);
+  const slide = useRef(new Animated.Value(0)).current;
+  const windowWidth = Dimensions.get('window').width;
+  const imageHeight = (windowWidth * 9) / 16;
 
   const fetchData = useCallback(async () => {
     setIsLoading(true);
@@ -55,6 +61,16 @@ export default function OrganizerEventDetailScreen({ route, navigation }: Props)
     }, [fetchData])
   );
 
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <Pressable onPress={() => navigation.navigate('DeletedEvents')} style={{ marginRight: 12 }} hitSlop={8}>
+          <Ionicons name="archive-outline" size={22} color={colors.primary} />
+        </Pressable>
+      ),
+    });
+  }, [navigation, colors.primary]);
+
   if (isLoading) {
     return (
       <View style={styles.centered}>
@@ -74,6 +90,7 @@ export default function OrganizerEventDetailScreen({ route, navigation }: Props)
   const totalRevenue = event.ticketTypes.reduce((sum, tt) => sum + tt.quantitySold * tt.price, 0);
   const totalSold = event.ticketTypes.reduce((sum, tt) => sum + tt.quantitySold, 0);
   const isCancelled = event.status === 'cancelled';
+  const isDeleted = event.status === 'deleted';
 
   const handleCancelEvent = () => {
     Alert.alert(
@@ -101,9 +118,122 @@ export default function OrganizerEventDetailScreen({ route, navigation }: Props)
     );
   };
 
+  const handleDeleteEvent = () => {
+    Alert.alert(
+      'Remover evento',
+      'Tem certeza que deseja remover este evento? Esta ação ocultará o evento permanentemente dos compradores.',
+      [
+        { text: 'Voltar', style: 'cancel' },
+        {
+          text: 'Remover',
+          style: 'destructive',
+            onPress: async () => {
+            setIsDeleting(true);
+            try {
+              const { event: updated } = await deleteEvent(event.id);
+              setEvent(updated);
+              Alert.alert('Evento removido', 'O evento foi removido com sucesso.');
+            } catch (err) {
+              const message = err instanceof ApiError ? err.message : 'Não foi possível remover o evento.';
+              Alert.alert('Erro', message);
+            } finally {
+              setIsDeleting(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleRestoreEvent = () => {
+    Alert.alert(
+      'Restaurar evento',
+      'Deseja restaurar este evento para ficar disponível novamente para compradores?',
+      [
+        { text: 'Voltar', style: 'cancel' },
+        {
+          text: 'Restaurar',
+          onPress: async () => {
+            setIsRestoring(true);
+            try {
+              const { event: updated } = await restoreEvent(event.id);
+              setEvent(updated);
+              Alert.alert('Restaurado', 'O evento foi restaurado com sucesso.');
+            } catch (err) {
+              const message = err instanceof ApiError ? err.message : 'Não foi possível restaurar o evento.';
+              Alert.alert('Erro', message);
+            } finally {
+              setIsRestoring(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handlePurgeEvent = () => {
+    Alert.alert(
+      'Apagar permanentemente',
+      'Esta ação apagará o evento e todos os dados relacionados permanentemente. Deseja continuar?',
+      [
+        { text: 'Voltar', style: 'cancel' },
+        {
+          text: 'Apagar',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await purgeEvent(event.id);
+              Alert.alert('Apagado', 'O evento foi apagado permanentemente.');
+              navigation.goBack();
+            } catch (err) {
+              const message = err instanceof ApiError ? err.message : 'Não foi possível apagar o evento.';
+              Alert.alert('Erro', message);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const hideImage = () => {
+    Animated.timing(slide, {
+      toValue: 1,
+      duration: 300,
+      useNativeDriver: true,
+    }).start(() => setImageHidden(true));
+  };
+
+  const showImage = () => {
+    slide.setValue(1);
+    setImageHidden(false);
+    Animated.timing(slide, {
+      toValue: 0,
+      duration: 300,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  const translateY = slide.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, -imageHeight - 20],
+  });
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 40 }}>
-      <Image source={{ uri: event.imageUrl }} style={styles.image} />
+      {!imageHidden && (
+        <Animated.View style={{ transform: [{ translateY }] }}>
+          <Image source={{ uri: event.imageUrl }} style={styles.image} />
+          <Pressable style={styles.hideButton} onPress={hideImage}>
+            <Ionicons name="close" size={20} color="#fff" />
+          </Pressable>
+        </Animated.View>
+      )}
+
+      {imageHidden && (
+        <Pressable style={[styles.showButton, { backgroundColor: colors.primary }]} onPress={showImage}>
+          <Ionicons name="image" size={18} color="#fff" />
+        </Pressable>
+      )}
 
       <View style={styles.body}>
         <View style={styles.categoryRow}>
@@ -111,6 +241,11 @@ export default function OrganizerEventDetailScreen({ route, navigation }: Props)
           {isCancelled && (
             <View style={styles.cancelledBadge}>
               <Text style={styles.cancelledBadgeText}>Evento cancelado</Text>
+            </View>
+          )}
+          {isDeleted && (
+            <View style={styles.deletedBadge}>
+              <Text style={styles.deletedBadgeText}>Evento removido</Text>
             </View>
           )}
         </View>
@@ -173,7 +308,7 @@ export default function OrganizerEventDetailScreen({ route, navigation }: Props)
           </Pressable>
         </View>
 
-        {!isCancelled && (
+        {!isCancelled && !isDeleted && (
           <View style={styles.shareRow}>
             <Pressable
               style={[styles.shareButton, { borderColor: colors.primary }]}
@@ -195,6 +330,46 @@ export default function OrganizerEventDetailScreen({ route, navigation }: Props)
                   <Text style={[styles.shareButtonText, { color: '#DC2626' }]}>Cancelar evento</Text>
                 </>
               )}
+            </Pressable>
+            <Pressable
+              style={[styles.shareButton, styles.deleteButton]}
+              onPress={handleDeleteEvent}
+              disabled={isDeleting}
+            >
+              {isDeleting ? (
+                <ActivityIndicator size="small" color="#DC2626" />
+              ) : (
+                <>
+                  <Ionicons name="trash-outline" size={18} color="#DC2626" />
+                  <Text style={[styles.shareButtonText, { color: '#DC2626' }]}>Remover evento</Text>
+                </>
+              )}
+            </Pressable>
+          </View>
+        )}
+
+        {isDeleted && (
+          <View style={styles.shareRow}>
+            <Pressable
+              style={[styles.shareButton, { borderColor: colors.primary }]}
+              onPress={handleRestoreEvent}
+              disabled={isRestoring}
+            >
+              {isRestoring ? (
+                <ActivityIndicator size="small" color={colors.primary} />
+              ) : (
+                <>
+                  <Ionicons name="refresh-outline" size={18} color={colors.primary} />
+                  <Text style={[styles.shareButtonText, { color: colors.primary }]}>Restaurar evento</Text>
+                </>
+              )}
+            </Pressable>
+            <Pressable
+              style={[styles.shareButton, styles.deleteButton]}
+              onPress={handlePurgeEvent}
+            >
+              <Ionicons name="trash-outline" size={18} color="#DC2626" />
+              <Text style={[styles.shareButtonText, { color: '#DC2626' }]}>Apagar permanentemente</Text>
             </Pressable>
           </View>
         )}
@@ -307,6 +482,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     paddingVertical: 12,
   },
+  deleteButton: { borderColor: '#DC2626' },
   shareButtonText: { fontSize: 13, fontWeight: '700' },
   cancelButton: { borderColor: '#DC2626' },
   sectionTitle: { fontSize: 16, fontWeight: '700', color: '#111827', marginTop: 28, marginBottom: 8 },
@@ -342,4 +518,35 @@ const styles = StyleSheet.create({
   checkedInBadgeText: { fontSize: 10, fontWeight: '700', color: '#059669' },
   pendingBadgeText: { fontSize: 10, color: '#9CA3AF' },
   cancelledLabelText: { fontSize: 10, color: '#DC2626', fontWeight: '700' },
+  hideButton: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+  showButton: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 20,
+  },
+  deletedBadge: {
+    backgroundColor: '#F3F4F6',
+    borderRadius: 20,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    marginLeft: 8,
+  },
+  deletedBadgeText: { fontSize: 11, fontWeight: '700', color: '#6B7280' },
 });
+

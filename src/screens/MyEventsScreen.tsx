@@ -129,11 +129,12 @@ export default function MyEventsScreen({ navigation }: Props) {
           const sold = totalSold(item);
           const available = totalAvailable(item);
           const pct = available > 0 ? Math.round((sold / available) * 100) : 0;
+          const onCardPress = item.status === 'deleted' ? undefined : () => navigation.navigate('OrganizerEventDetail', { eventId: item.id });
+
+          const cardStyle = [styles.card, item.status === 'deleted' ? { opacity: 0.6 } : null];
+
           return (
-            <Pressable
-              style={styles.card}
-              onPress={() => navigation.navigate('OrganizerEventDetail', { eventId: item.id })}
-            >
+            <Pressable style={cardStyle} onPress={onCardPress} disabled={item.status === 'deleted'}>
               <Image source={{ uri: item.imageUrl }} style={styles.image} />
               <View style={styles.body}>
                 <View style={styles.titleRow}>
@@ -142,6 +143,16 @@ export default function MyEventsScreen({ navigation }: Props) {
                     <View style={styles.cancelledBadge}>
                       <Text style={styles.cancelledBadgeText}>Cancelado</Text>
                     </View>
+                  )}
+                  {item.status === 'deleted' && (
+                    <View style={styles.deletedBadge}>
+                      <Text style={styles.deletedBadgeText}>Removido</Text>
+                    </View>
+                  )}
+                  {item.status === 'deleted' && (
+                    <Pressable onPress={() => navigation.navigate('OrganizerEventDetail', { eventId: item.id })} style={{ marginLeft: 6 }} hitSlop={8}>
+                      <Ionicons name="arrow-forward-circle" size={20} color={colors.primary} />
+                    </Pressable>
                   )}
                 </View>
                 <Text style={styles.date}>{formatDate(item.date)} · {item.location}</Text>
@@ -206,6 +217,8 @@ const styles = StyleSheet.create({
   title: { fontSize: 15, fontWeight: '700', color: '#111827' },
   cancelledBadge: { backgroundColor: '#FEE2E2', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2 },
   cancelledBadgeText: { fontSize: 10, fontWeight: '700', color: '#DC2626' },
+  deletedBadge: { backgroundColor: '#F3F4F6', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2, marginLeft: 6 },
+  deletedBadgeText: { fontSize: 10, fontWeight: '700', color: '#6B7280' },
   date: { fontSize: 12, color: '#6B7280', marginTop: 2 },
   progressBar: {
     height: 6,

@@ -68,43 +68,64 @@ export async function paymentWebhook(req, res) {
   }
 
   const ticketId = payment.external_reference;
-  const ticket = ticketId ? await Ticket.findById(ticketId) : null;
-  if (!ticket) {
+  // attempt to find a single ticket by id or multiple tickets by reservationId
+  let tickets = [];
+  if (ticketId) {
+    const single = await Ticket.findById(ticketId).catch(() => null);
+    if (single) tickets = [single];
+    else tickets = await Ticket.find({ reservationId: ticketId });
+  }
+
+  if (!tickets || tickets.length === 0) {
     return res.status(200).send('ticket not found');
   }
 
-  if (ticket.status !== 'pending_payment') {
+  // ignore already processed
+  if (!tickets.every((t) => t.status === 'pending_payment')) {
     return res.status(200).send('already processed');
   }
 
   if (payment.status === 'approved') {
-    ticket.status = 'paid';
-    ticket.paymentId = String(payment.id);
-    await ticket.save();
+    for (const t of tickets) {
+      t.status = 'paid';
+      t.paymentId = String(payment.id);
+      await t.save();
+    }
 
-    const event = await Event.findById(ticket.event);
-    const buyer = await User.findById(ticket.buyer);
+    const event = await Event.findById(tickets[0].event);
+    const buyer = await User.findById(tickets[0].buyer);
     if (event && buyer) {
+      // send a single confirmation to the buyer summarizing the reservation
       sendTicketConfirmationEmail(buyer.email, {
         event,
-        ticketTypeName: ticket.ticketTypeName,
-        quantity: ticket.quantity,
-        totalPaid: ticket.totalPaid,
-        code: ticket.code,
+        ticketTypeName: tickets[0].ticketTypeName,
+        quantity: tickets.length,
+        totalPaid: tickets.reduce((s, x) => s + (x.totalPaid || 0), 0),
+        code: tickets[0].reservationId ? tickets[0].reservationId.toString() : tickets[0].code,
       }).catch((err) => console.error('Falha ao enviar email de confirmação:', err.message));
     }
   } else if (payment.status === 'rejected' || payment.status === 'cancelled') {
-    const event = await Event.findById(ticket.event);
+    const event = await Event.findById(tickets[0].event);
     if (event) {
-      const ticketType = event.ticketTypes.id(ticket.ticketTypeId);
+      const ticketType = event.ticketTypes.id(tickets[0].ticketTypeId);
       if (ticketType) {
-        ticketType.quantitySold = Math.max(0, ticketType.quantitySold - ticket.quantity);
+        ticketType.quantitySold = Math.max(0, ticketType.quantitySold - tickets.length);
         await event.save();
       }
     }
-    ticket.status = 'cancelled';
-    ticket.paymentId = String(payment.id);
-    await ticket.save();
+
+    // restore group seats if present
+    const groupId = tickets[0].groupId;
+    if (groupId) {
+      const Group = (await import('../models/Group.js')).default;
+      const group = await Group.findById(groupId).catch(() => null);
+      if (group) {
+        group.seatsLeft = Math.min(group.size, group.seatsLeft + tickets.length);
+        await group.save();
+      }
+    }
+
+    await Ticket.updateMany({ _id: { $in: tickets.map((t) => t._id) } }, { $set: { status: 'cancelled', paymentId: String(payment.id) } });
   }
   // status "pending" (ex: boleto/pix aguardando): não faz nada, aguarda próxima notificação
 

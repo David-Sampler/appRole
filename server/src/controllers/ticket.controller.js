@@ -105,3 +105,27 @@ export async function checkInTicket(req, res) {
     },
   });
 }
+
+export async function claimTicket(req, res) {
+  const code = req.params.code?.trim().toUpperCase();
+  const { name, email } = req.body;
+  if (!code) return res.status(400).json({ message: 'Código ausente.' });
+  if (!name || !email) return res.status(400).json({ message: 'Nome e email são obrigatórios para reivindicar.' });
+
+  const ticket = await Ticket.findOne({ code }).exec();
+  if (!ticket) return res.status(404).json({ message: 'Ingresso não encontrado.' });
+  if (ticket.attendeeEmail) {
+    return res.status(409).json({ message: 'Este ingresso já foi reivindicado.' });
+  }
+
+  ticket.attendeeName = name;
+  ticket.attendeeEmail = email.toLowerCase();
+
+  // if a user exists with this email, link it
+  const user = await User.findOne({ email: ticket.attendeeEmail }).catch(() => null);
+  if (user) ticket.attendeeUser = user._id;
+
+  await ticket.save();
+
+  res.json({ ticket: toPublicTicket(ticket) });
+}

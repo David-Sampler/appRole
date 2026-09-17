@@ -42,7 +42,8 @@
         {
           "locationWhenInUsePermission": "O Rolê usa sua localização pra sugerir a cidade do evento que você está criando."
         }
-      ]
+      ],
+      "expo-font"
     ]
   }
 }

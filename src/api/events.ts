@@ -58,6 +58,22 @@ export function cancelEvent(eventId: string) {
   return request<{ event: Event }>(`/events/${eventId}/cancel`, { method: 'PATCH' });
 }
 
+export function deleteEvent(eventId: string) {
+  return request<{ event: Event }>(`/events/${eventId}`, { method: 'DELETE' });
+}
+
+export function restoreEvent(eventId: string) {
+  return request<{ event: Event }>(`/events/${eventId}/restore`, { method: 'PATCH' });
+}
+
+export function listDeletedEvents() {
+  return request<{ events: Event[] }>('/events/deleted');
+}
+
+export function purgeEvent(eventId: string) {
+  return request<void>(`/events/${eventId}/purge`, { method: 'DELETE' });
+}
+
 export function purchaseTicket(eventId: string, ticketTypeId: string, quantity: number) {
   return request<{ ticket: import('../types').PurchasedTicket; checkoutUrl: string }>(
     `/events/${eventId}/purchase`,

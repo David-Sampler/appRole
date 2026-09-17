@@ -14,6 +14,9 @@ router.get('/e/:eventId', async (req, res) => {
   if (!event) {
     return res.status(404).send(pageLayout('Evento não encontrado', '<p>Este evento não existe ou foi removido.</p>'));
   }
+  if (event.status === 'deleted') {
+    return res.status(404).send(pageLayout('Evento não encontrado', '<p>Este evento não existe ou foi removido.</p>'));
+  }
   res.send(pageLayout(event.title, eventCheckoutPage(event)));
 });
 

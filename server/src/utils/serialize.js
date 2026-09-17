@@ -47,5 +47,12 @@ export function toPublicTicket(ticket) {
     code: ticket.code,
     checkedInAt: ticket.checkedInAt ?? null,
     status: ticket.status,
+    groupId: ticket.groupId ? ticket.groupId.toString() : null,
+    groupCode: ticket.groupCode ?? null,
+    groupName: ticket.groupName ?? null,
+    groupSeatIndex: ticket.groupSeatIndex ?? null,
+    attendeeName: ticket.attendeeName ?? null,
+    attendeeEmail: ticket.attendeeEmail ?? null,
+    attendeeUserId: ticket.attendeeUser ? ticket.attendeeUser.toString() : null,
   };
 }

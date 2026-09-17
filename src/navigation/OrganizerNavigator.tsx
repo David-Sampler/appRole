@@ -4,6 +4,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import MyEventsScreen from '../screens/MyEventsScreen';
+import DeletedEventsScreen from '../screens/DeletedEventsScreen';
 import CreateEventScreen from '../screens/CreateEventScreen';
 import OrganizerEventDetailScreen from '../screens/OrganizerEventDetailScreen';
 import CheckInScannerScreen from '../screens/CheckInScannerScreen';
@@ -29,6 +30,9 @@ function MyEventsStackScreen() {
           headerRight: () => (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
               <ThemeToggleButton />
+              <Pressable onPress={() => navigation.navigate('DeletedEvents')} hitSlop={8}>
+                <Ionicons name="archive-outline" size={24} color={primaryColor} />
+              </Pressable>
               <Pressable onPress={() => navigation.navigate('Help')} hitSlop={8}>
                 <Ionicons name="help-circle-outline" size={24} color={primaryColor} />
               </Pressable>
@@ -36,6 +40,7 @@ function MyEventsStackScreen() {
           ),
         })}
       />
+      <Stack.Screen name="DeletedEvents" component={DeletedEventsScreen} options={{ title: 'Eventos removidos' }} />
       <Stack.Screen name="Help" component={HelpScreen} options={{ title: 'Como funciona' }} />
       <Stack.Screen
         name="CreateEvent"

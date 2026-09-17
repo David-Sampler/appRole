@@ -18,6 +18,17 @@ const ticketSchema = new mongoose.Schema(
     },
     paymentId: { type: String },
     paymentPreferenceId: { type: String },
+    // Group/table support
+    groupId: { type: mongoose.Schema.Types.ObjectId, ref: 'Group' },
+    groupCode: { type: String },
+    groupName: { type: String },
+    groupSeatIndex: { type: Number },
+    // Reservation grouping: when multiple ticket documents belong to the same checkout
+    reservationId: { type: mongoose.Schema.Types.ObjectId },
+    // attendee info for each ticket (optional)
+    attendeeName: { type: String },
+    attendeeEmail: { type: String },
+    attendeeUser: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   },
   { timestamps: true }
 );

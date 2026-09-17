@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import Event from '../models/Event.js';
 import Ticket from '../models/Ticket.js';
+import Group from '../models/Group.js';
 import User from '../models/User.js';
 import { toPublicEvent, toPublicTicket } from '../utils/serialize.js';
 import { createPaymentPreference, isPaymentsConfigured } from '../utils/mercadopago.js';
@@ -29,17 +30,19 @@ export async function listCities(req, res) {
 export async function getEvent(req, res) {
   const event = await Event.findById(req.params.id);
   if (!event) return res.status(404).json({ message: 'Evento não encontrado.' });
+  if (event.status === 'deleted') return res.status(404).json({ message: 'Evento não encontrado.' });
   res.json({ event: toPublicEvent(event) });
 }
 
 export async function myEvents(req, res) {
-  const events = await Event.find({ organizer: req.user._id }).sort({ createdAt: -1 });
+  const events = await Event.find({ organizer: req.user._id, status: { $ne: 'deleted' } }).sort({ createdAt: -1 });
   res.json({ events: events.map(toPublicEvent) });
 }
 
 export async function eventBuyers(req, res) {
   const event = await Event.findById(req.params.id);
   if (!event) return res.status(404).json({ message: 'Evento não encontrado.' });
+  if (event.status === 'deleted') return res.status(404).json({ message: 'Evento não encontrado.' });
   if (event.organizer.toString() !== req.user._id.toString()) {
     return res.status(403).json({ message: 'Você não é o organizador deste evento.' });
   }
@@ -184,11 +187,76 @@ export async function cancelEvent(req, res) {
   res.json({ event: toPublicEvent(event) });
 }
 
+export async function deleteEvent(req, res) {
+  const event = await Event.findById(req.params.id);
+  if (!event) return res.status(404).json({ message: 'Evento não encontrado.' });
+  if (event.organizer.toString() !== req.user._id.toString()) {
+    return res.status(403).json({ message: 'Você não é o organizador deste evento.' });
+  }
+  if (event.status === 'deleted') {
+    return res.status(409).json({ message: 'Este evento já foi removido.' });
+  }
+
+  // Soft delete: mark status and keep data for audit/recovery
+  event.status = 'deleted';
+  event.deletedAt = new Date();
+  await event.save();
+
+  res.json({ event: toPublicEvent(event) });
+}
+
+export async function restoreEvent(req, res) {
+  const event = await Event.findById(req.params.id);
+  if (!event) return res.status(404).json({ message: 'Evento não encontrado.' });
+  if (event.organizer.toString() !== req.user._id.toString()) {
+    return res.status(403).json({ message: 'Você não é o organizador deste evento.' });
+  }
+  if (event.status !== 'deleted') {
+    return res.status(409).json({ message: 'Este evento não está removido.' });
+  }
+
+  event.status = 'active';
+  event.deletedAt = undefined;
+  await event.save();
+
+  res.json({ event: toPublicEvent(event) });
+}
+
+export async function listDeletedEvents(req, res) {
+  const events = await Event.find({ organizer: req.user._id, status: 'deleted' }).sort({ deletedAt: -1 });
+  res.json({ events: events.map(toPublicEvent) });
+}
+
+export async function purgeEvent(req, res) {
+  const event = await Event.findById(req.params.id);
+  if (!event) return res.status(404).json({ message: 'Evento não encontrado.' });
+  if (event.organizer.toString() !== req.user._id.toString()) {
+    return res.status(403).json({ message: 'Você não é o organizador deste evento.' });
+  }
+  if (event.status !== 'deleted') {
+    return res.status(409).json({ message: 'Somente eventos removidos podem ser apagados definitivamente.' });
+  }
+
+  const session = await mongoose.startSession();
+  try {
+    await session.withTransaction(async () => {
+      // remove related tickets and groups, then event
+      await Ticket.deleteMany({ event: event._id }).session(session);
+      await Group.deleteMany({ event: event._id }).session(session);
+      await Event.deleteOne({ _id: event._id }).session(session);
+    });
+  } finally {
+    await session.endSession();
+  }
+
+  res.status(204).send();
+}
+
 function generateTicketCode() {
   return Math.random().toString(36).slice(2, 10).toUpperCase();
 }
 
-async function reserveTicket({ eventId, ticketTypeId, quantity, buyerId, session }) {
+async function reserveTicket({ eventId, ticketTypeId, quantity, buyerId, session, groupId }) {
   const event = await Event.findById(eventId).session(session);
   if (!event) {
     const err = new Error('Evento não encontrado.');
@@ -207,10 +275,65 @@ async function reserveTicket({ eventId, ticketTypeId, quantity, buyerId, session
     err.status = 409;
     throw err;
   }
-
+  // decrement counters
   ticketType.quantitySold += quantity;
   await event.save({ session });
 
+  // If groupId provided, reserve seats in group and create individual ticket docs grouped by reservationId
+  if (groupId) {
+    const group = await Group.findById(groupId).session(session);
+    if (!group) {
+      const err = new Error('Mesa/Grupo não encontrado.');
+      err.status = 404;
+      throw err;
+    }
+    if (group.seatsLeft < quantity) {
+      const err = new Error(`Restam apenas ${group.seatsLeft} lugares nesta mesa.`);
+      err.status = 409;
+      throw err;
+    }
+
+    group.seatsLeft -= quantity;
+    await group.save({ session });
+
+    // create individual ticket documents; include attendee info when provided
+    const ticketDocs = await Ticket.create(
+      Array.from({ length: quantity }).map((_, idx) => {
+        const attendee = Array.isArray(attendees) ? attendees[idx] : null;
+        return {
+          event: event._id,
+          ticketTypeId: ticketType._id,
+          buyer: buyerId,
+          eventTitle: event.title,
+          ticketTypeName: ticketType.name,
+          quantity: 1,
+          totalPaid: ticketType.price,
+          code: generateTicketCode(),
+          status: 'pending_payment',
+          groupId: group._id,
+          groupCode: group.code,
+          groupName: group.name,
+          attendeeName: attendee?.name ?? undefined,
+          attendeeEmail: attendee?.email ?? undefined,
+        };
+      }),
+      { session }
+    );
+
+    const reservationId = ticketDocs[0]._id;
+    const ids = ticketDocs.map((t) => t._id);
+    await Ticket.updateMany({ _id: { $in: ids } }, { $set: { reservationId } }, { session });
+
+    // update the first ticket to act as representative for checkout (aggregate total)
+    const first = await Ticket.findById(reservationId).session(session);
+    first.quantity = quantity;
+    first.totalPaid = ticketType.price * quantity;
+    await first.save({ session });
+
+    return { ticketDoc: first, eventDoc: event };
+  }
+
+  // default: single-ticket reservation (existing behavior)
   const [ticketDoc] = await Ticket.create(
     [
       {
@@ -233,7 +356,37 @@ async function reserveTicket({ eventId, ticketTypeId, quantity, buyerId, session
 
 async function releaseReservation(ticketId) {
   const ticket = await Ticket.findById(ticketId);
-  if (!ticket || ticket.status !== 'pending_payment') return;
+  if (!ticket) return;
+
+  if (ticket.reservationId) {
+    // cancel all tickets in reservation
+    const tickets = await Ticket.find({ reservationId: ticket.reservationId, status: 'pending_payment' });
+    if (!tickets || tickets.length === 0) return;
+    const event = await Event.findById(ticket.event);
+    if (event) {
+      const ticketType = event.ticketTypes.id(ticket.ticketTypeId);
+      if (ticketType) {
+        const qty = tickets.length;
+        ticketType.quantitySold = Math.max(0, ticketType.quantitySold - qty);
+        await event.save();
+      }
+    }
+
+    // restore group seats if any
+    const groupId = ticket.groupId;
+    if (groupId) {
+      const group = await Group.findById(groupId);
+      if (group) {
+        group.seatsLeft = Math.min(group.size, group.seatsLeft + tickets.length);
+        await group.save();
+      }
+    }
+
+    await Ticket.updateMany({ reservationId: ticket.reservationId, status: 'pending_payment' }, { $set: { status: 'cancelled' } });
+    return;
+  }
+
+  if (ticket.status !== 'pending_payment') return;
 
   const event = await Event.findById(ticket.event);
   if (event) {
@@ -289,7 +442,7 @@ async function startCheckout({ ticketDoc, eventDoc, payerEmail, res }) {
 
 export async function purchaseTicket(req, res) {
   const { id: eventId } = req.params;
-  const { ticketTypeId, quantity } = req.body;
+  const { ticketTypeId, quantity, groupId, attendees } = req.body;
 
   if (!ticketTypeId || !Number.isInteger(quantity) || quantity <= 0) {
     return res.status(400).json({ message: 'Dados de compra inválidos.' });
@@ -306,6 +459,8 @@ export async function purchaseTicket(req, res) {
         quantity,
         buyerId: req.user._id,
         session,
+        groupId,
+        attendees,
       });
       ticketDoc = result.ticketDoc;
       eventDoc = result.eventDoc;
@@ -321,7 +476,7 @@ export async function purchaseTicket(req, res) {
 
 export async function guestPurchase(req, res) {
   const { id: eventId } = req.params;
-  const { name, email, ticketTypeId, quantity } = req.body;
+  const { name, email, ticketTypeId, quantity, groupId, attendees } = req.body;
 
   if (!name || !email || !ticketTypeId || !Number.isInteger(quantity) || quantity <= 0) {
     return res.status(400).json({ message: 'Preencha nome, email e a quantidade de ingressos.' });
@@ -347,6 +502,8 @@ export async function guestPurchase(req, res) {
         quantity,
         buyerId: buyer._id,
         session,
+        groupId,
+        attendees,
       });
       ticketDoc = result.ticketDoc;
       eventDoc = result.eventDoc;

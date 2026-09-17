@@ -8,6 +8,7 @@ import ticketRoutes from './routes/ticket.routes.js';
 import paymentRoutes from './routes/payment.routes.js';
 import uploadRoutes from './routes/upload.routes.js';
 import publicRoutes from './routes/public.routes.js';
+import groupRoutes from './routes/group.routes.js';
 
 const app = express();
 
@@ -22,6 +23,7 @@ app.use('/api/tickets', ticketRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/uploads', uploadRoutes);
 app.use(publicRoutes);
+app.use('/api/groups', groupRoutes);
 
 app.use((err, req, res, next) => {
   console.error(err);

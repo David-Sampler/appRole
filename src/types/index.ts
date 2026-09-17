@@ -1,6 +1,6 @@
 export type UserRole = 'organizer' | 'buyer';
 export type TicketStatus = 'pending_payment' | 'paid' | 'cancelled';
-export type EventStatus = 'active' | 'cancelled';
+export type EventStatus = 'active' | 'cancelled' | 'deleted';
 
 export interface User {
   id: string;
