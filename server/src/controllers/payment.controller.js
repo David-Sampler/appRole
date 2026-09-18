@@ -106,7 +106,7 @@ export async function paymentWebhook(req, res) {
     }
   } else if (payment.status === 'rejected' || payment.status === 'cancelled') {
     const event = await Event.findById(tickets[0].event);
-    if (event) {
+    if (event && tickets[0].ticketTypeId) {
       const ticketType = event.ticketTypes.id(tickets[0].ticketTypeId);
       if (ticketType) {
         ticketType.quantitySold = Math.max(0, ticketType.quantitySold - tickets.length);
@@ -121,6 +121,7 @@ export async function paymentWebhook(req, res) {
       const group = await Group.findById(groupId).catch(() => null);
       if (group) {
         group.seatsLeft = Math.min(group.size, group.seatsLeft + tickets.length);
+        if (group.seatsLeft >= group.size) group.status = 'available';
         await group.save();
       }
     }

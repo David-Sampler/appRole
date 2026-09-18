@@ -92,6 +92,8 @@ export interface EventBuyer {
   purchasedAt: string;
   checkedInAt: string | null;
   status: 'pending_payment' | 'paid' | 'cancelled';
+  groupName: string | null;
+  attendeeName: string | null;
 }
 
 export function eventBuyers(eventId: string) {

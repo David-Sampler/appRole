@@ -37,7 +37,7 @@ export function toPublicTicket(ticket) {
   return {
     id: ticket._id.toString(),
     eventId: ticket.event.toString(),
-    ticketTypeId: ticket.ticketTypeId.toString(),
+    ticketTypeId: ticket.ticketTypeId ? ticket.ticketTypeId.toString() : null,
     buyerId: ticket.buyer.toString(),
     eventTitle: ticket.eventTitle,
     ticketTypeName: ticket.ticketTypeName,
@@ -54,5 +54,18 @@ export function toPublicTicket(ticket) {
     attendeeName: ticket.attendeeName ?? null,
     attendeeEmail: ticket.attendeeEmail ?? null,
     attendeeUserId: ticket.attendeeUser ? ticket.attendeeUser.toString() : null,
+  };
+}
+
+export function toPublicGroup(group) {
+  return {
+    id: group._id.toString(),
+    eventId: group.event.toString(),
+    name: group.name,
+    size: group.size,
+    seatsLeft: group.seatsLeft,
+    price: group.price,
+    code: group.code,
+    status: group.status,
   };
 }

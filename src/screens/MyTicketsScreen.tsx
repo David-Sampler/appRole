@@ -133,6 +133,10 @@ export default function MyTicketsScreen() {
                 ))}
             </View>
 
+            {item.attendeeName && (
+              <Text style={styles.attendeeName}>Convidado: {item.attendeeName}</Text>
+            )}
+
             {item.status === 'paid' ? (
               <View style={[styles.qrWrapper, item.checkedInAt && styles.qrWrapperUsed]}>
                 <QRCode value={item.code} size={160} />
@@ -168,7 +172,7 @@ export default function MyTicketsScreen() {
               </View>
             </View>
 
-            {item.status === 'paid' && !item.checkedInAt && (
+            {item.status === 'paid' && !item.checkedInAt && !item.groupId && (
               <Pressable
                 style={styles.cancelTicketButton}
                 onPress={() => handleCancelTicket(item)}
@@ -206,6 +210,7 @@ const styles = StyleSheet.create({
   cardHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
   eventTitle: { fontSize: 16, fontWeight: '700', color: '#111827' },
   ticketType: { fontSize: 13, color: '#6B7280', marginTop: 2 },
+  attendeeName: { fontSize: 12, fontWeight: '700', color: '#374151', marginTop: 10 },
   validBadge: {
     borderRadius: 10,
     paddingHorizontal: 10,

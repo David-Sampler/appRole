@@ -8,6 +8,8 @@ import DeletedEventsScreen from '../screens/DeletedEventsScreen';
 import CreateEventScreen from '../screens/CreateEventScreen';
 import OrganizerEventDetailScreen from '../screens/OrganizerEventDetailScreen';
 import CheckInScannerScreen from '../screens/CheckInScannerScreen';
+import OrganizerGroupsScreen from '../screens/OrganizerGroupsScreen';
+import CreateGroupScreen from '../screens/CreateGroupScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import HelpScreen from '../screens/HelpScreen';
 import ThemeToggleButton from '../components/ThemeToggleButton';
@@ -57,6 +59,8 @@ function MyEventsStackScreen() {
         component={CheckInScannerScreen}
         options={{ title: 'Validar ingressos', headerShown: false }}
       />
+      <Stack.Screen name="Groups" component={OrganizerGroupsScreen} options={{ title: 'Mesas' }} />
+      <Stack.Screen name="CreateGroup" component={CreateGroupScreen} options={{ title: 'Criar mesa' }} />
     </Stack.Navigator>
   );
 }

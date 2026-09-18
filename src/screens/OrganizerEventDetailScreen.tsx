@@ -281,6 +281,14 @@ export default function OrganizerEventDetailScreen({ route, navigation }: Props)
           <Text style={styles.scanButtonText}>Validar ingressos na entrada</Text>
         </Pressable>
 
+        <Pressable
+          style={[styles.shareButton, { borderColor: colors.primary, marginTop: 12 }]}
+          onPress={() => navigation.navigate('Groups', { eventId: event.id })}
+        >
+          <Ionicons name="grid-outline" size={18} color={colors.primary} />
+          <Text style={[styles.shareButtonText, { color: colors.primary }]}>Mesas</Text>
+        </Pressable>
+
         <View style={styles.shareRow}>
           <Pressable
             style={[styles.shareButton, { borderColor: colors.primary }]}
@@ -402,10 +410,12 @@ export default function OrganizerEventDetailScreen({ route, navigation }: Props)
           buyers.map((b) => (
             <View key={b.id} style={styles.buyerCard}>
               <View style={{ flex: 1 }}>
-                <Text style={styles.buyerName}>{b.buyerName}</Text>
+                <Text style={styles.buyerName}>{b.attendeeName ?? b.buyerName}</Text>
                 <Text style={styles.buyerSub}>
-                  {b.quantity}x {b.ticketTypeName} · {formatDateTime(b.purchasedAt)}
+                  {b.groupName ? `Mesa: ${b.groupName}` : `${b.quantity}x ${b.ticketTypeName}`} ·{' '}
+                  {formatDateTime(b.purchasedAt)}
                 </Text>
+                {b.groupName && <Text style={styles.buyerSub}>Comprou: {b.buyerName}</Text>}
                 <Text style={[styles.buyerCode, { color: colors.primary }]}>Código: {b.code}</Text>
               </View>
               <View style={{ alignItems: 'flex-end', gap: 4 }}>

@@ -16,6 +16,7 @@ import * as WebBrowser from 'expo-web-browser';
 import PrimaryButton from '../components/PrimaryButton';
 import { BuyerStackParamList } from '../navigation/types';
 import { getEvent, purchaseTicket } from '../api/events';
+import { listGroups, EventGroup } from '../api/groups';
 import { ApiError } from '../api/client';
 import { Event } from '../types';
 import { useThemeStore } from '../store/useThemeStore';
@@ -27,7 +28,7 @@ function formatDate(dateStr: string) {
   return d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' });
 }
 
-export default function EventDetailScreen({ route }: Props) {
+export default function EventDetailScreen({ route, navigation }: Props) {
   const colors = useThemeStore((s) => s.colors);
   const { eventId } = route.params;
   const [event, setEvent] = useState<Event | null>(null);
@@ -36,6 +37,7 @@ export default function EventDetailScreen({ route }: Props) {
   const [selectedTypeId, setSelectedTypeId] = useState<string | null>(null);
   const [quantity, setQuantity] = useState(1);
   const [isBuying, setIsBuying] = useState(false);
+  const [groups, setGroups] = useState<EventGroup[]>([]);
 
   const fetchEvent = useCallback(async () => {
     setIsLoading(true);
@@ -51,10 +53,20 @@ export default function EventDetailScreen({ route }: Props) {
     }
   }, [eventId]);
 
+  const fetchGroups = useCallback(async () => {
+    try {
+      const { groups: fetched } = await listGroups(eventId);
+      setGroups(fetched);
+    } catch {
+      // mesas são um extra opcional; falha silenciosa não deve travar a tela do evento
+    }
+  }, [eventId]);
+
   useFocusEffect(
     useCallback(() => {
       fetchEvent();
-    }, [fetchEvent])
+      fetchGroups();
+    }, [fetchEvent, fetchGroups])
   );
 
   if (isLoading) {
@@ -97,6 +109,15 @@ export default function EventDetailScreen({ route }: Props) {
     } finally {
       setIsBuying(false);
     }
+  };
+
+  const handleBuyGroup = (group: EventGroup) => {
+    navigation.navigate('PurchaseGroup', {
+      groupId: group.id,
+      groupName: group.name,
+      size: group.size,
+      price: group.price,
+    });
   };
 
   return (
@@ -155,6 +176,33 @@ export default function EventDetailScreen({ route }: Props) {
               </Pressable>
             );
           })}
+
+          {groups.length > 0 && (
+            <>
+              <Text style={styles.sectionTitle}>Mesas</Text>
+              {groups.map((group) => {
+                const soldOut = group.status === 'sold';
+                return (
+                  <View key={group.id} style={[styles.ticketOption, soldOut && styles.ticketOptionDisabled]}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.ticketName}>{group.name}</Text>
+                      <Text style={styles.ticketLeft}>
+                        {soldOut ? 'Mesa vendida' : `${group.size} ${group.size === 1 ? 'pessoa' : 'pessoas'}`}
+                      </Text>
+                    </View>
+                    <Text style={styles.ticketPrice}>R$ {group.price.toFixed(2)}</Text>
+                    {!soldOut && (
+                      <PrimaryButton
+                        title="Comprar"
+                        onPress={() => handleBuyGroup(group)}
+                        style={styles.groupBuyButton}
+                      />
+                    )}
+                  </View>
+                );
+              })}
+            </>
+          )}
         </View>
       </ScrollView>
 
@@ -212,6 +260,7 @@ const styles = StyleSheet.create({
   ticketName: { fontSize: 15, fontWeight: '700', color: '#111827' },
   ticketLeft: { fontSize: 12, color: '#6B7280', marginTop: 2 },
   ticketPrice: { fontSize: 16, fontWeight: '700', color: '#059669' },
+  groupBuyButton: { paddingVertical: 8, paddingHorizontal: 16, marginLeft: 12 },
   footer: {
     position: 'absolute',
     bottom: 0,

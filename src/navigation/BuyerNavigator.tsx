@@ -5,6 +5,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import ExploreScreen from '../screens/ExploreScreen';
 import EventDetailScreen from '../screens/EventDetailScreen';
+import PurchaseGroupScreen from '../screens/PurchaseGroupScreen';
 import MyTicketsScreen from '../screens/MyTicketsScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import HelpScreen from '../screens/HelpScreen';
@@ -41,6 +42,11 @@ function ExploreStackScreen() {
         options={{ title: 'Detalhes do evento' }}
       />
       <Stack.Screen name="Help" component={HelpScreen} options={{ title: 'Como funciona' }} />
+      <Stack.Screen
+        name="PurchaseGroup"
+        component={PurchaseGroupScreen}
+        options={{ title: 'Comprar mesa' }}
+      />
     </Stack.Navigator>
   );
 }

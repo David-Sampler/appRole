@@ -38,7 +38,7 @@ export interface Event {
 export interface PurchasedTicket {
   id: string;
   eventId: string;
-  ticketTypeId: string;
+  ticketTypeId: string | null;
   buyerId: string;
   eventTitle: string;
   ticketTypeName: string;
@@ -48,4 +48,9 @@ export interface PurchasedTicket {
   code: string;
   checkedInAt: string | null;
   status: TicketStatus;
+  groupId: string | null;
+  groupCode: string | null;
+  groupName: string | null;
+  groupSeatIndex: number | null;
+  attendeeName: string | null;
 }

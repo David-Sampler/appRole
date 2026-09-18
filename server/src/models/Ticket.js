@@ -3,7 +3,7 @@ import mongoose from 'mongoose';
 const ticketSchema = new mongoose.Schema(
   {
     event: { type: mongoose.Schema.Types.ObjectId, ref: 'Event', required: true },
-    ticketTypeId: { type: mongoose.Schema.Types.ObjectId, required: true },
+    ticketTypeId: { type: mongoose.Schema.Types.ObjectId, required: function () { return !this.groupId; } },
     buyer: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     eventTitle: { type: String, required: true },
     ticketTypeName: { type: String, required: true },

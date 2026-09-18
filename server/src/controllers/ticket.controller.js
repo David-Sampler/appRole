@@ -21,6 +21,11 @@ export async function cancelTicket(req, res) {
   if (ticket.checkedInAt) {
     return res.status(409).json({ message: 'Este ingresso já foi validado na entrada e não pode ser cancelado.' });
   }
+  if (ticket.groupId) {
+    return res.status(409).json({
+      message: 'Ingressos de mesa não podem ser cancelados individualmente. Entre em contato com o organizador.',
+    });
+  }
 
   const event = await Event.findById(ticket.event);
   if (!event) return res.status(404).json({ message: 'Evento não encontrado.' });

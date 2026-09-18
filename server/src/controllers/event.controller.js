@@ -63,6 +63,8 @@ export async function eventBuyers(req, res) {
       purchasedAt: t.createdAt,
       checkedInAt: t.checkedInAt ?? null,
       status: t.status,
+      groupName: t.groupName ?? null,
+      attendeeName: t.attendeeName ?? null,
     })),
   });
 }
@@ -256,7 +258,7 @@ function generateTicketCode() {
   return Math.random().toString(36).slice(2, 10).toUpperCase();
 }
 
-async function reserveTicket({ eventId, ticketTypeId, quantity, buyerId, session, groupId }) {
+async function reserveTicket({ eventId, ticketTypeId, quantity, buyerId, session }) {
   const event = await Event.findById(eventId).session(session);
   if (!event) {
     const err = new Error('Evento não encontrado.');
@@ -279,61 +281,6 @@ async function reserveTicket({ eventId, ticketTypeId, quantity, buyerId, session
   ticketType.quantitySold += quantity;
   await event.save({ session });
 
-  // If groupId provided, reserve seats in group and create individual ticket docs grouped by reservationId
-  if (groupId) {
-    const group = await Group.findById(groupId).session(session);
-    if (!group) {
-      const err = new Error('Mesa/Grupo não encontrado.');
-      err.status = 404;
-      throw err;
-    }
-    if (group.seatsLeft < quantity) {
-      const err = new Error(`Restam apenas ${group.seatsLeft} lugares nesta mesa.`);
-      err.status = 409;
-      throw err;
-    }
-
-    group.seatsLeft -= quantity;
-    await group.save({ session });
-
-    // create individual ticket documents; include attendee info when provided
-    const ticketDocs = await Ticket.create(
-      Array.from({ length: quantity }).map((_, idx) => {
-        const attendee = Array.isArray(attendees) ? attendees[idx] : null;
-        return {
-          event: event._id,
-          ticketTypeId: ticketType._id,
-          buyer: buyerId,
-          eventTitle: event.title,
-          ticketTypeName: ticketType.name,
-          quantity: 1,
-          totalPaid: ticketType.price,
-          code: generateTicketCode(),
-          status: 'pending_payment',
-          groupId: group._id,
-          groupCode: group.code,
-          groupName: group.name,
-          attendeeName: attendee?.name ?? undefined,
-          attendeeEmail: attendee?.email ?? undefined,
-        };
-      }),
-      { session }
-    );
-
-    const reservationId = ticketDocs[0]._id;
-    const ids = ticketDocs.map((t) => t._id);
-    await Ticket.updateMany({ _id: { $in: ids } }, { $set: { reservationId } }, { session });
-
-    // update the first ticket to act as representative for checkout (aggregate total)
-    const first = await Ticket.findById(reservationId).session(session);
-    first.quantity = quantity;
-    first.totalPaid = ticketType.price * quantity;
-    await first.save({ session });
-
-    return { ticketDoc: first, eventDoc: event };
-  }
-
-  // default: single-ticket reservation (existing behavior)
   const [ticketDoc] = await Ticket.create(
     [
       {
@@ -354,7 +301,7 @@ async function reserveTicket({ eventId, ticketTypeId, quantity, buyerId, session
   return { ticketDoc, eventDoc: event };
 }
 
-async function releaseReservation(ticketId) {
+export async function releaseReservation(ticketId) {
   const ticket = await Ticket.findById(ticketId);
   if (!ticket) return;
 
@@ -363,7 +310,7 @@ async function releaseReservation(ticketId) {
     const tickets = await Ticket.find({ reservationId: ticket.reservationId, status: 'pending_payment' });
     if (!tickets || tickets.length === 0) return;
     const event = await Event.findById(ticket.event);
-    if (event) {
+    if (event && ticket.ticketTypeId) {
       const ticketType = event.ticketTypes.id(ticket.ticketTypeId);
       if (ticketType) {
         const qty = tickets.length;
@@ -378,6 +325,7 @@ async function releaseReservation(ticketId) {
       const group = await Group.findById(groupId);
       if (group) {
         group.seatsLeft = Math.min(group.size, group.seatsLeft + tickets.length);
+        if (group.seatsLeft >= group.size) group.status = 'available';
         await group.save();
       }
     }
@@ -389,7 +337,7 @@ async function releaseReservation(ticketId) {
   if (ticket.status !== 'pending_payment') return;
 
   const event = await Event.findById(ticket.event);
-  if (event) {
+  if (event && ticket.ticketTypeId) {
     const ticketType = event.ticketTypes.id(ticket.ticketTypeId);
     if (ticketType) {
       ticketType.quantitySold = Math.max(0, ticketType.quantitySold - ticket.quantity);
@@ -402,7 +350,7 @@ async function releaseReservation(ticketId) {
 
 const PLATFORM_FEE_PERCENT = Number(process.env.PLATFORM_FEE_PERCENT || 0);
 
-async function startCheckout({ ticketDoc, eventDoc, payerEmail, res }) {
+export async function startCheckout({ ticketDoc, eventDoc, payerEmail, res }) {
   if (!isPaymentsConfigured()) {
     await releaseReservation(ticketDoc._id);
     return res.status(503).json({
@@ -442,7 +390,7 @@ async function startCheckout({ ticketDoc, eventDoc, payerEmail, res }) {
 
 export async function purchaseTicket(req, res) {
   const { id: eventId } = req.params;
-  const { ticketTypeId, quantity, groupId, attendees } = req.body;
+  const { ticketTypeId, quantity } = req.body;
 
   if (!ticketTypeId || !Number.isInteger(quantity) || quantity <= 0) {
     return res.status(400).json({ message: 'Dados de compra inválidos.' });
@@ -459,8 +407,6 @@ export async function purchaseTicket(req, res) {
         quantity,
         buyerId: req.user._id,
         session,
-        groupId,
-        attendees,
       });
       ticketDoc = result.ticketDoc;
       eventDoc = result.eventDoc;
@@ -476,7 +422,7 @@ export async function purchaseTicket(req, res) {
 
 export async function guestPurchase(req, res) {
   const { id: eventId } = req.params;
-  const { name, email, ticketTypeId, quantity, groupId, attendees } = req.body;
+  const { name, email, ticketTypeId, quantity } = req.body;
 
   if (!name || !email || !ticketTypeId || !Number.isInteger(quantity) || quantity <= 0) {
     return res.status(400).json({ message: 'Preencha nome, email e a quantidade de ingressos.' });
@@ -502,8 +448,6 @@ export async function guestPurchase(req, res) {
         quantity,
         buyerId: buyer._id,
         session,
-        groupId,
-        attendees,
       });
       ticketDoc = result.ticketDoc;
       eventDoc = result.eventDoc;
