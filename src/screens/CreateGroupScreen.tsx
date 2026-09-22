@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, TextInput, ScrollView, Alert } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { OrganizerStackParamList } from '../navigation/types';
-import { createGroup } from '../api/groups';
+import { createGroup, updateGroup } from '../api/groups';
 import { ApiError } from '../api/client';
 import PrimaryButton from '../components/PrimaryButton';
 import { useThemeStore } from '../store/useThemeStore';
@@ -10,11 +10,11 @@ import { useThemeStore } from '../store/useThemeStore';
 type Props = NativeStackScreenProps<OrganizerStackParamList, 'CreateGroup'>;
 
 export default function CreateGroupScreen({ route, navigation }: Props) {
-  const { eventId } = route.params;
+  const { eventId, group } = route.params;
   const colors = useThemeStore((s) => s.colors);
-  const [name, setName] = useState('');
-  const [size, setSize] = useState('');
-  const [price, setPrice] = useState('');
+  const [name, setName] = useState(group?.name ?? '');
+  const [size, setSize] = useState(group ? String(group.size) : '');
+  const [price, setPrice] = useState(group ? String(group.price) : '');
   const [isSaving, setIsSaving] = useState(false);
 
   const handleSave = async () => {
@@ -36,10 +36,14 @@ export default function CreateGroupScreen({ route, navigation }: Props) {
 
     setIsSaving(true);
     try {
-      await createGroup(eventId, { name: name.trim(), size: sizeNumber, price: priceNumber });
+      if (group) {
+        await updateGroup(group.id, { name: name.trim(), size: sizeNumber, price: priceNumber });
+      } else {
+        await createGroup(eventId, { name: name.trim(), size: sizeNumber, price: priceNumber });
+      }
       navigation.goBack();
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : 'Não foi possível criar a mesa.';
+      const message = err instanceof ApiError ? err.message : 'Não foi possível salvar a mesa.';
       Alert.alert('Erro', message);
     } finally {
       setIsSaving(false);
@@ -80,7 +84,12 @@ export default function CreateGroupScreen({ route, navigation }: Props) {
         Esse é o valor total da mesa, cobrado uma única vez. Cada pessoa recebe seu próprio QR code de entrada.
       </Text>
 
-      <PrimaryButton title="Criar mesa" onPress={handleSave} loading={isSaving} style={{ marginTop: 28 }} />
+      <PrimaryButton
+        title={group ? 'Salvar alterações' : 'Criar mesa'}
+        onPress={handleSave}
+        loading={isSaving}
+        style={{ marginTop: 28 }}
+      />
     </ScrollView>
   );
 }

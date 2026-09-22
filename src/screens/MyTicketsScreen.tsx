@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { View, Text, StyleSheet, FlatList, ActivityIndicator, RefreshControl, Pressable, Alert } from 'react-native';
+import { View, Text, StyleSheet, FlatList, ActivityIndicator, RefreshControl, Pressable, Alert, Share } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import QRCode from 'react-native-qrcode-svg';
 import { useFocusEffect } from '@react-navigation/native';
@@ -7,6 +7,7 @@ import * as ticketsApi from '../api/tickets';
 import { ApiError } from '../api/client';
 import { PurchasedTicket } from '../types';
 import { useThemeStore } from '../store/useThemeStore';
+import { ticketViewUrl } from '../utils/publicUrl';
 
 function formatDateTime(iso: string) {
   const d = new Date(iso);
@@ -70,6 +71,17 @@ export default function MyTicketsScreen() {
         },
       ]
     );
+  };
+
+  const handleShareTicket = async (ticket: PurchasedTicket) => {
+    const who = ticket.attendeeName ? ` (${ticket.attendeeName})` : '';
+    try {
+      await Share.share({
+        message: `Seu ingresso para ${ticket.eventTitle}${who}: ${ticketViewUrl(ticket.code)}`,
+      });
+    } catch {
+      // usuário cancelou o compartilhamento, nada a fazer
+    }
   };
 
   if (isLoading) {
@@ -171,6 +183,13 @@ export default function MyTicketsScreen() {
                 <Text style={styles.date}>{formatDateTime(item.purchasedAt)}</Text>
               </View>
             </View>
+
+            {item.status === 'paid' && (
+              <Pressable style={styles.shareTicketButton} onPress={() => handleShareTicket(item)}>
+                <Ionicons name="share-social-outline" size={16} color={colors.primary} />
+                <Text style={[styles.shareTicketButtonText, { color: colors.primary }]}>Compartilhar</Text>
+              </Pressable>
+            )}
 
             {item.status === 'paid' && !item.checkedInAt && !item.groupId && (
               <Pressable
@@ -274,4 +293,16 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   cancelTicketButtonText: { fontSize: 12, fontWeight: '700', color: '#DC2626' },
+  shareTicketButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 10,
+    paddingVertical: 10,
+  },
+  shareTicketButtonText: { fontSize: 12, fontWeight: '700' },
 });

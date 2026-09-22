@@ -93,16 +93,31 @@ export async function paymentWebhook(req, res) {
     }
 
     const event = await Event.findById(tickets[0].event);
-    const buyer = await User.findById(tickets[0].buyer);
-    if (event && buyer) {
-      // send a single confirmation to the buyer summarizing the reservation
-      sendTicketConfirmationEmail(buyer.email, {
-        event,
-        ticketTypeName: tickets[0].ticketTypeName,
-        quantity: tickets.length,
-        totalPaid: tickets.reduce((s, x) => s + (x.totalPaid || 0), 0),
-        code: tickets[0].reservationId ? tickets[0].reservationId.toString() : tickets[0].code,
-      }).catch((err) => console.error('Falha ao enviar email de confirmação:', err.message));
+    const isGroupPurchase = tickets.some((t) => t.groupId);
+
+    if (event && isGroupPurchase) {
+      // mesa: cada pessoa recebe seu próprio ingresso/QR code por email
+      for (const t of tickets) {
+        if (!t.attendeeEmail) continue;
+        sendTicketConfirmationEmail(t.attendeeEmail, {
+          event,
+          ticketTypeName: t.ticketTypeName,
+          quantity: 1,
+          totalPaid: t.totalPaid || 0,
+          code: t.code,
+        }).catch((err) => console.error(`Falha ao enviar email da mesa para ${t.attendeeEmail}:`, err.message));
+      }
+    } else if (event) {
+      const buyer = await User.findById(tickets[0].buyer);
+      if (buyer) {
+        sendTicketConfirmationEmail(buyer.email, {
+          event,
+          ticketTypeName: tickets[0].ticketTypeName,
+          quantity: tickets.length,
+          totalPaid: tickets.reduce((s, x) => s + (x.totalPaid || 0), 0),
+          code: tickets[0].code,
+        }).catch((err) => console.error('Falha ao enviar email de confirmação:', err.message));
+      }
     }
   } else if (payment.status === 'rejected' || payment.status === 'cancelled') {
     const event = await Event.findById(tickets[0].event);

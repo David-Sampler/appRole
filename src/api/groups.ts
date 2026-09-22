@@ -20,6 +20,10 @@ export function createGroup(eventId: string, input: { name: string; size: number
   return request<{ group: EventGroup }>(`/groups/event/${eventId}`, { method: 'POST', body: input });
 }
 
+export function updateGroup(groupId: string, input: { name: string; size: number; price: number }) {
+  return request<{ group: EventGroup }>(`/groups/${groupId}`, { method: 'PUT', body: input });
+}
+
 export interface GroupAttendee {
   name: string;
   email?: string;

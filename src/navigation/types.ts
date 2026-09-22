@@ -25,7 +25,7 @@ export type OrganizerStackParamList = {
   OrganizerEventDetail: { eventId: string };
   CheckInScanner: { eventId: string };
   Groups: { eventId: string };
-  CreateGroup: { eventId: string };
+  CreateGroup: { eventId: string; group?: { id: string; name: string; size: number; price: number } };
   Help: undefined;
 };
 

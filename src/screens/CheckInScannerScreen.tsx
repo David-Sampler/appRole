@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { View, Text, StyleSheet, Pressable, Alert } from 'react-native';
+import { View, Text, StyleSheet, Pressable, TextInput, ActivityIndicator } from 'react-native';
 import { CameraView, useCameraPermissions, BarcodeScanningResult } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -23,14 +23,14 @@ function formatTime(iso: string) {
 export default function CheckInScannerScreen({ navigation }: Props) {
   const [permission, requestPermission] = useCameraPermissions();
   const [lastResult, setLastResult] = useState<LastResult | null>(null);
+  const [manualMode, setManualMode] = useState(false);
+  const [manualCode, setManualCode] = useState('');
+  const [isSubmittingManual, setIsSubmittingManual] = useState(false);
   const isProcessing = useRef(false);
 
-  const handleScanned = async (result: BarcodeScanningResult) => {
-    if (isProcessing.current) return;
-    isProcessing.current = true;
-
+  const validateCode = async (code: string) => {
     try {
-      const response = await checkInTicket(result.data);
+      const response = await checkInTicket(code);
       setLastResult({
         kind: 'success',
         title: 'Ingresso válido ✅',
@@ -53,11 +53,24 @@ export default function CheckInScannerScreen({ navigation }: Props) {
           detail: err instanceof ApiError ? err.message : 'Não foi possível validar.',
         });
       }
-    } finally {
-      setTimeout(() => {
-        isProcessing.current = false;
-      }, 1500);
     }
+  };
+
+  const handleScanned = async (result: BarcodeScanningResult) => {
+    if (isProcessing.current) return;
+    isProcessing.current = true;
+    await validateCode(result.data);
+    setTimeout(() => {
+      isProcessing.current = false;
+    }, 1500);
+  };
+
+  const handleManualSubmit = async () => {
+    if (!manualCode.trim()) return;
+    setIsSubmittingManual(true);
+    await validateCode(manualCode.trim());
+    setManualCode('');
+    setIsSubmittingManual(false);
   };
 
   if (!permission) {
@@ -78,20 +91,58 @@ export default function CheckInScannerScreen({ navigation }: Props) {
 
   return (
     <View style={styles.container}>
-      <CameraView
-        style={StyleSheet.absoluteFill}
-        facing="back"
-        barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
-        onBarcodeScanned={handleScanned}
-      />
+      {!manualMode && (
+        <CameraView
+          style={StyleSheet.absoluteFill}
+          facing="back"
+          barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+          onBarcodeScanned={handleScanned}
+        />
+      )}
 
-      <View style={styles.overlay}>
-        <View style={styles.frame} />
-        <Text style={styles.hint}>Aponte a câmera para o QR code do ingresso</Text>
-      </View>
+      {!manualMode ? (
+        <View style={styles.overlay}>
+          <View style={styles.frame} />
+          <Text style={styles.hint}>Aponte a câmera para o QR code do ingresso</Text>
+        </View>
+      ) : (
+        <View style={styles.manualOverlay}>
+          <Text style={styles.manualLabel}>Código do ingresso</Text>
+          <TextInput
+            style={styles.manualInput}
+            placeholder="Ex: A1B2C3D4"
+            placeholderTextColor="#9CA3AF"
+            autoCapitalize="characters"
+            value={manualCode}
+            onChangeText={setManualCode}
+          />
+          <Pressable
+            style={[styles.manualButton, isSubmittingManual && { opacity: 0.6 }]}
+            onPress={handleManualSubmit}
+            disabled={isSubmittingManual}
+          >
+            {isSubmittingManual ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.manualButtonText}>Validar</Text>
+            )}
+          </Pressable>
+        </View>
+      )}
 
       <Pressable style={styles.closeButton} onPress={() => navigation.goBack()}>
         <Ionicons name="close" size={26} color="#fff" />
+      </Pressable>
+
+      <Pressable
+        style={styles.modeButton}
+        onPress={() => {
+          setManualMode((m) => !m);
+          setLastResult(null);
+        }}
+      >
+        <Ionicons name={manualMode ? 'camera-outline' : 'keypad-outline'} size={22} color="#fff" />
+        <Text style={styles.modeButtonText}>{manualMode ? 'Usar câmera' : 'Digitar código'}</Text>
       </Pressable>
 
       {lastResult && (
@@ -139,6 +190,48 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     backgroundColor: 'transparent',
   },
+  manualOverlay: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+  },
+  manualLabel: { color: '#fff', fontSize: 14, marginBottom: 12 },
+  manualInput: {
+    width: '100%',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 18,
+    fontWeight: '700',
+    letterSpacing: 2,
+    textAlign: 'center',
+    color: '#111827',
+  },
+  manualButton: {
+    marginTop: 16,
+    backgroundColor: '#7C3AED',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  manualButtonText: { color: '#fff', fontSize: 15, fontWeight: '700' },
+  modeButton: {
+    position: 'absolute',
+    top: 56,
+    left: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  modeButtonText: { color: '#fff', fontSize: 13, fontWeight: '700' },
   hint: {
     color: '#fff',
     marginTop: 20,

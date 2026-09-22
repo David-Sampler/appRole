@@ -60,7 +60,11 @@ function MyEventsStackScreen() {
         options={{ title: 'Validar ingressos', headerShown: false }}
       />
       <Stack.Screen name="Groups" component={OrganizerGroupsScreen} options={{ title: 'Mesas' }} />
-      <Stack.Screen name="CreateGroup" component={CreateGroupScreen} options={{ title: 'Criar mesa' }} />
+      <Stack.Screen
+        name="CreateGroup"
+        component={CreateGroupScreen}
+        options={({ route }) => ({ title: route.params?.group ? 'Editar mesa' : 'Criar mesa' })}
+      />
     </Stack.Navigator>
   );
 }

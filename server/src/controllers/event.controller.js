@@ -350,7 +350,7 @@ export async function releaseReservation(ticketId) {
 
 const PLATFORM_FEE_PERCENT = Number(process.env.PLATFORM_FEE_PERCENT || 0);
 
-export async function startCheckout({ ticketDoc, eventDoc, payerEmail, res }) {
+export async function startCheckout({ ticketDoc, eventDoc, payerEmail, res, chargeAmount }) {
   if (!isPaymentsConfigured()) {
     await releaseReservation(ticketDoc._id);
     return res.status(503).json({
@@ -366,12 +366,14 @@ export async function startCheckout({ ticketDoc, eventDoc, payerEmail, res }) {
     });
   }
 
+  const amount = chargeAmount ?? ticketDoc.totalPaid;
+
   try {
-    const marketplaceFee = Math.round(ticketDoc.totalPaid * (PLATFORM_FEE_PERCENT / 100) * 100) / 100;
+    const marketplaceFee = Math.round(amount * (PLATFORM_FEE_PERCENT / 100) * 100) / 100;
     const { preferenceId, checkoutUrl } = await createPaymentPreference({
       ticketId: ticketDoc._id.toString(),
       title: `${ticketDoc.quantity}x ${ticketDoc.ticketTypeName} — ${eventDoc.title}`,
-      unitPrice: ticketDoc.totalPaid / ticketDoc.quantity,
+      unitPrice: amount / ticketDoc.quantity,
       quantity: ticketDoc.quantity,
       payerEmail,
       sellerAccessToken: organizer.mpAccessToken,

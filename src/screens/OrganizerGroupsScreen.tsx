@@ -95,22 +95,35 @@ export default function OrganizerGroupsScreen({ route, navigation }: Props) {
             <Text style={styles.emptyText}>Nenhuma mesa criada ainda</Text>
           </View>
         }
-        renderItem={({ item }) => (
-          <View style={styles.card}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.name}>{item.name}</Text>
-              <Text style={styles.sub}>
-                {item.size} {item.size === 1 ? 'pessoa' : 'pessoas'} · Código: {item.code}
-              </Text>
-            </View>
-            <View style={{ alignItems: 'flex-end', gap: 4 }}>
-              <Text style={[styles.price, { color: colors.primary }]}>R$ {item.price.toFixed(2)}</Text>
-              <View style={[styles.badge, item.status === 'sold' ? styles.badgeSold : styles.badgeAvailable]}>
-                <Text style={styles.badgeText}>{item.status === 'sold' ? 'Vendida' : 'Disponível'}</Text>
+        renderItem={({ item }) => {
+          const editable = item.status === 'available';
+          return (
+            <Pressable
+              style={styles.card}
+              disabled={!editable}
+              onPress={() =>
+                navigation.navigate('CreateGroup', {
+                  eventId,
+                  group: { id: item.id, name: item.name, size: item.size, price: item.price },
+                })
+              }
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={styles.name}>{item.name}</Text>
+                <Text style={styles.sub}>
+                  {item.size} {item.size === 1 ? 'pessoa' : 'pessoas'} · Código: {item.code}
+                </Text>
               </View>
-            </View>
-          </View>
-        )}
+              <View style={{ alignItems: 'flex-end', gap: 4 }}>
+                <Text style={[styles.price, { color: colors.primary }]}>R$ {item.price.toFixed(2)}</Text>
+                <View style={[styles.badge, item.status === 'sold' ? styles.badgeSold : styles.badgeAvailable]}>
+                  <Text style={styles.badgeText}>{item.status === 'sold' ? 'Vendida' : 'Disponível'}</Text>
+                </View>
+              </View>
+              {editable && <Ionicons name="chevron-forward" size={18} color="#D1D5DB" />}
+            </Pressable>
+          );
+        }}
       />
 
       <View style={styles.footer}>

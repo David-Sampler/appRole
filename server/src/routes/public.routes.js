@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import Event from '../models/Event.js';
 import Ticket from '../models/Ticket.js';
+import Group from '../models/Group.js';
 import { generateQrDataUrl } from '../utils/qrcode.js';
 import { pageLayout } from '../views/layout.js';
 import { eventCheckoutPage } from '../views/eventCheckout.js';
@@ -17,7 +18,8 @@ router.get('/e/:eventId', async (req, res) => {
   if (event.status === 'deleted') {
     return res.status(404).send(pageLayout('Evento não encontrado', '<p>Este evento não existe ou foi removido.</p>'));
   }
-  res.send(pageLayout(event.title, eventCheckoutPage(event)));
+  const groups = await Group.find({ event: event._id, status: 'available' }).sort({ createdAt: 1 });
+  res.send(pageLayout(event.title, eventCheckoutPage(event, groups)));
 });
 
 router.get('/t/:code', async (req, res) => {

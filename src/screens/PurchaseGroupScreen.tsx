@@ -9,28 +9,45 @@ import PrimaryButton from '../components/PrimaryButton';
 
 type Props = NativeStackScreenProps<BuyerStackParamList, 'PurchaseGroup'>;
 
+interface AttendeeInput {
+  name: string;
+  email: string;
+}
+
+function isValidEmail(email: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
 export default function PurchaseGroupScreen({ route, navigation }: Props) {
   const { groupId, groupName, size, price } = route.params;
-  const [names, setNames] = useState<string[]>(Array.from({ length: size }, () => ''));
+  const [attendees, setAttendees] = useState<AttendeeInput[]>(
+    Array.from({ length: size }, () => ({ name: '', email: '' }))
+  );
   const [isBuying, setIsBuying] = useState(false);
 
+  const updateAttendee = (idx: number, field: keyof AttendeeInput, value: string) => {
+    setAttendees((prev) => prev.map((a, i) => (i === idx ? { ...a, [field]: value } : a)));
+  };
+
   const handleBuy = async () => {
-    const attendees = names.map((n) => n.trim());
-    if (attendees.some((n) => !n)) {
+    const trimmed = attendees.map((a) => ({ name: a.name.trim(), email: a.email.trim() }));
+    if (trimmed.some((a) => !a.name)) {
       Alert.alert('Ops', 'Preencha o nome de todas as pessoas da mesa.');
+      return;
+    }
+    if (trimmed.some((a) => a.email && !isValidEmail(a.email))) {
+      Alert.alert('Ops', 'O email informado não é válido. Deixe em branco se não tiver.');
       return;
     }
 
     setIsBuying(true);
     try {
-      const { checkoutUrl } = await purchaseGroup(
-        groupId,
-        attendees.map((name) => ({ name }))
-      );
+      const payload = trimmed.map((a) => ({ name: a.name, email: a.email || undefined }));
+      const { checkoutUrl } = await purchaseGroup(groupId, payload);
       await WebBrowser.openBrowserAsync(checkoutUrl);
       Alert.alert(
         'Pagamento em andamento',
-        'Assim que o pagamento for confirmado, os QR codes de cada pessoa aparecerão em "Meus Ingressos".'
+        'Assim que o pagamento for confirmado, quem tiver email recebe o QR code automaticamente. Os demais aparecem em "Meus Ingressos" pra você compartilhar.'
       );
       navigation.goBack();
     } catch (err) {
@@ -48,20 +65,28 @@ export default function PurchaseGroupScreen({ route, navigation }: Props) {
         {size} {size === 1 ? 'pessoa' : 'pessoas'} · R$ {price.toFixed(2)} no total
       </Text>
       <Text style={styles.hint}>
-        Informe o nome de cada pessoa. Cada uma recebe seu próprio QR code de entrada em "Meus Ingressos".
+        Informe o nome de cada pessoa. O email é opcional — se preenchido, essa pessoa recebe o QR code
+        automaticamente por email; senão, você pode compartilhar depois em "Meus Ingressos".
       </Text>
 
-      {names.map((name, idx) => (
-        <View key={idx}>
+      {attendees.map((attendee, idx) => (
+        <View key={idx} style={styles.attendeeBlock}>
           <Text style={styles.label}>Pessoa {idx + 1}</Text>
           <TextInput
             style={styles.input}
             placeholder="Nome completo"
             placeholderTextColor="#9CA3AF"
-            value={name}
-            onChangeText={(text) =>
-              setNames((prev) => prev.map((n, i) => (i === idx ? text : n)))
-            }
+            value={attendee.name}
+            onChangeText={(text) => updateAttendee(idx, 'name', text)}
+          />
+          <TextInput
+            style={[styles.input, { marginTop: 8 }]}
+            placeholder="Email (opcional)"
+            placeholderTextColor="#9CA3AF"
+            autoCapitalize="none"
+            keyboardType="email-address"
+            value={attendee.email}
+            onChangeText={(text) => updateAttendee(idx, 'email', text)}
           />
         </View>
       ))}
@@ -81,7 +106,8 @@ const styles = StyleSheet.create({
   title: { fontSize: 20, fontWeight: '800', color: '#111827' },
   subtitle: { fontSize: 14, color: '#6B7280', marginTop: 4 },
   hint: { fontSize: 12, color: '#9CA3AF', marginTop: 12, marginBottom: 8 },
-  label: { fontSize: 14, fontWeight: '600', color: '#374151', marginBottom: 8, marginTop: 16 },
+  attendeeBlock: { marginTop: 16 },
+  label: { fontSize: 14, fontWeight: '600', color: '#374151', marginBottom: 8 },
   input: {
     borderWidth: 1,
     borderColor: '#E5E7EB',
