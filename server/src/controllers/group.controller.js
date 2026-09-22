@@ -134,7 +134,7 @@ async function reserveGroup({ groupId, buyerId, attendees, session }) {
       attendeeName: attendees[idx].name.trim(),
       attendeeEmail: attendees[idx].email ? String(attendees[idx].email).toLowerCase().trim() : undefined,
     })),
-    { session }
+    { session, ordered: true }
   );
 
   const reservationId = ticketDocs[0]._id;
