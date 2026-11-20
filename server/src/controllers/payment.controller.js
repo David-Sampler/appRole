@@ -7,6 +7,45 @@ import { releaseReservation } from './event.controller.js';
 import { sendTicketConfirmationEmail } from '../utils/mailer.js';
 import { signOAuthState, verifyOAuthState } from '../utils/jwt.js';
 import { pageLayout } from '../views/layout.js';
+import { encryptSecret, decryptSecret } from '../utils/security.js';
+import crypto from 'node:crypto';
+
+// Assinatura do webhook (painel do Mercado Pago → Webhooks → "Assinatura secreta").
+// Só é exigida quando MERCADOPAGO_WEBHOOK_SECRET está configurada.
+function hasValidWebhookSignature(req) {
+  const secret = process.env.MERCADOPAGO_WEBHOOK_SECRET;
+  if (!secret) return true;
+  const header = req.get('x-signature') || '';
+  const requestId = req.get('x-request-id') || '';
+  const parts = Object.fromEntries(
+    header.split(',').map((p) => p.trim().split('=')).filter((kv) => kv.length === 2)
+  );
+  if (!parts.ts || !parts.v1) return false;
+  const dataId = String(req.query['data.id'] ?? req.body?.data?.id ?? '').toLowerCase();
+  const manifest = `id:${dataId};request-id:${requestId};ts:${parts.ts};`;
+  const expected = crypto.createHmac('sha256', secret).update(manifest).digest('hex');
+  const a = Buffer.from(expected);
+  const b = Buffer.from(String(parts.v1));
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+// O pagamento precisa corresponder à compra: mesmo valor (ou mais), em reais, e pago ao
+// organizador do evento. Sem isso, alguém poderia "pagar" o ingresso de outro evento com R$ 0,01.
+function paymentMatchesTickets(payment, tickets, organizer) {
+  const expected = tickets.reduce((sum, t) => sum + (t.totalPaid || 0), 0);
+  const tolerance = 0.01 * tickets.length; // arredondamento do preço por pessoa da mesa
+  if (typeof payment.transaction_amount !== 'number' || payment.transaction_amount + tolerance < expected) {
+    return `valor ${payment.transaction_amount} menor que o esperado ${expected}`;
+  }
+  if (payment.currency_id && payment.currency_id !== 'BRL') return `moeda ${payment.currency_id}`;
+  if (organizer?.mpUserId && payment.collector_id != null && String(payment.collector_id) !== String(organizer.mpUserId)) {
+    return `recebedor ${payment.collector_id} não é o organizador ${organizer.mpUserId}`;
+  }
+  return null;
+}
+
+// motivos de cancelamento em que a pessoa ainda pode pagar e recuperar a vaga
+const RECLAIMABLE_REASONS = ['expired', 'replaced'];
 
 export async function connectMercadoPago(req, res) {
   const state = signOAuthState(req.user._id.toString());
@@ -34,8 +73,8 @@ export async function mercadoPagoCallback(req, res) {
     const tokenResponse = await exchangeOAuthCode(code);
     await User.findByIdAndUpdate(organizerId, {
       mpUserId: String(tokenResponse.user_id),
-      mpAccessToken: tokenResponse.access_token,
-      mpRefreshToken: tokenResponse.refresh_token,
+      mpAccessToken: encryptSecret(tokenResponse.access_token),
+      mpRefreshToken: encryptSecret(tokenResponse.refresh_token),
       mpConnectedAt: new Date(),
     });
   } catch (err) {
@@ -59,6 +98,10 @@ export async function paymentWebhook(req, res) {
 
   if (type !== 'payment' || !paymentId) {
     return res.status(200).send('ignored');
+  }
+  if (!hasValidWebhookSignature(req)) {
+    console.warn(`Webhook com assinatura inválida recusado (pagamento ${paymentId}).`);
+    return res.status(401).send('invalid signature');
   }
 
   let payment;
@@ -85,16 +128,25 @@ export async function paymentWebhook(req, res) {
   }
 
   const paymentIdStr = String(payment.id);
-  const expiredBeforePayment = tickets.every((t) => t.status === 'cancelled' && t.cancelReason === 'expired');
+  const ticketEvent = await Event.findById(tickets[0].event);
+  const organizer = ticketEvent ? await User.findById(ticketEvent.organizer) : null;
+
+  const mismatch = paymentMatchesTickets(payment, tickets, organizer);
+  if (mismatch) {
+    console.warn(`Pagamento ${paymentIdStr} ignorado para a reserva ${ticketId}: ${mismatch}`);
+    return res.status(200).send('payment does not match purchase');
+  }
+
+  const expiredBeforePayment = tickets.every(
+    (t) => t.status === 'cancelled' && RECLAIMABLE_REASONS.includes(t.cancelReason)
+  );
 
   if (payment.status === 'approved' && expiredBeforePayment) {
     // pagou depois que a reserva venceu: tenta segurar a vaga de novo; se não der, devolve o dinheiro
     const reclaimed = await reclaimExpiredReservation(tickets);
     if (!reclaimed) {
-      const event = await Event.findById(tickets[0].event);
-      const organizer = event ? await User.findById(event.organizer) : null;
       try {
-        await refundPayment(paymentIdStr, organizer?.mpAccessToken);
+        await refundPayment(paymentIdStr, decryptSecret(organizer?.mpAccessToken));
         await Ticket.updateMany(
           { _id: { $in: tickets.map((t) => t._id) } },
           { $set: { paymentId: paymentIdStr, cancelReason: 'expired_refunded' } }

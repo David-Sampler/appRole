@@ -6,15 +6,19 @@ export async function requireAuth(req, res, next) {
   if (!header || !header.startsWith('Bearer ')) {
     return res.status(401).json({ message: 'Token ausente.' });
   }
+  let user;
   try {
     const payload = verifyToken(header.slice('Bearer '.length));
-    const user = await User.findById(payload.sub);
+    user = await User.findById(payload.sub);
     if (!user) return res.status(401).json({ message: 'Usuário não encontrado.' });
-    req.user = user;
-    next();
+    if ((payload.v ?? 0) !== (user.tokenVersion ?? 0)) {
+      return res.status(401).json({ message: 'Sua sessão expirou. Entre novamente.' });
+    }
   } catch {
     return res.status(401).json({ message: 'Token inválido ou expirado.' });
   }
+  req.user = user;
+  next();
 }
 
 export function requireRole(role) {

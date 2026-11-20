@@ -17,6 +17,7 @@ import {
 } from '../controllers/event.controller.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
+import { purchaseLimiter } from '../middleware/rateLimit.js';
 
 const router = Router();
 
@@ -42,8 +43,9 @@ router.post(
   '/:id/purchase',
   requireAuth,
   requireRole('buyer'),
+  purchaseLimiter,
   asyncHandler(purchaseTicket)
 );
-router.post('/:id/guest-purchase', asyncHandler(guestPurchase));
+router.post('/:id/guest-purchase', purchaseLimiter, asyncHandler(guestPurchase));
 
 export default router;

@@ -6,6 +6,7 @@ import User from '../models/User.js';
 import { toPublicEvent, toPublicTicket } from '../utils/serialize.js';
 import { createPaymentPreference, isPaymentsConfigured } from '../utils/mercadopago.js';
 import { RESERVATION_TTL_MS } from '../config/reservation.js';
+import { randomCode, decryptSecret, isNonEmptyString, isValidEmail } from '../utils/security.js';
 
 // Texto digitado pelo usuário vira busca literal (ex: "Recife(" não quebra a regex).
 const escapeRegex = (text) => String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -13,7 +14,7 @@ const escapeRegex = (text) => String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'
 export async function listEvents(req, res) {
   const { search, category, city } = req.query;
   const filter = { status: 'active' };
-  if (category) filter.category = category;
+  if (category) filter.category = String(category);
   if (city) filter.city = { $regex: `^${escapeRegex(city)}$`, $options: 'i' };
   if (search) {
     const pattern = escapeRegex(search);
@@ -259,8 +260,34 @@ export async function purgeEvent(req, res) {
   res.status(204).send();
 }
 
-function generateTicketCode() {
-  return Math.random().toString(36).slice(2, 10).toUpperCase();
+export const MAX_TICKETS_PER_PURCHASE = Number(process.env.MAX_TICKETS_PER_PURCHASE || 10);
+
+export function generateTicketCode() {
+  return randomCode(8);
+}
+
+// Erro de compra → resposta: id malformado vira 404 e erro interno não expõe detalhes.
+export function purchaseErrorResponse(res, err, fallback) {
+  if (err?.name === 'CastError') return res.status(404).json({ message: 'Não encontrado.' });
+  const status = err?.status || 500;
+  if (status >= 500) console.error(err);
+  return res.status(status).json({ message: status >= 500 ? fallback : err.message });
+}
+
+// Uma nova compra substitui a reserva ainda não paga da mesma pessoa no mesmo evento:
+// quem fecha o checkout e tenta de novo não fica segurando o estoque em dobro.
+export async function releasePreviousReservations(buyerId, eventId) {
+  const pending = await Ticket.find(
+    { buyer: buyerId, event: eventId, status: 'pending_payment', paymentId: { $exists: false } },
+    { _id: 1, reservationId: 1 }
+  );
+  const seen = new Set();
+  for (const t of pending) {
+    const key = String(t.reservationId ?? t._id);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    await releaseReservation(t._id, 'replaced');
+  }
 }
 
 async function reserveTicket({ eventId, ticketTypeId, quantity, buyerId, session }) {
@@ -374,7 +401,8 @@ export async function startCheckout({ ticketDoc, eventDoc, payerEmail, res, char
   }
 
   const organizer = await User.findById(eventDoc.organizer);
-  if (!organizer?.mpAccessToken) {
+  const sellerAccessToken = organizer?.mpAccessToken ? decryptSecret(organizer.mpAccessToken) : null;
+  if (!sellerAccessToken) {
     await releaseReservation(ticketDoc._id);
     return res.status(409).json({
       message: 'O organizador deste evento ainda não conectou uma conta para receber pagamentos.',
@@ -391,7 +419,7 @@ export async function startCheckout({ ticketDoc, eventDoc, payerEmail, res, char
       unitPrice: amount / ticketDoc.quantity,
       quantity: ticketDoc.quantity,
       payerEmail,
-      sellerAccessToken: organizer.mpAccessToken,
+      sellerAccessToken,
       marketplaceFee,
       // o link de pagamento vence junto com a reserva
       expiresAt: new Date(ticketDoc.createdAt.getTime() + RESERVATION_TTL_MS),
@@ -411,8 +439,17 @@ export async function purchaseTicket(req, res) {
   const { id: eventId } = req.params;
   const { ticketTypeId, quantity } = req.body;
 
-  if (!ticketTypeId || !Number.isInteger(quantity) || quantity <= 0) {
+  if (!isNonEmptyString(ticketTypeId) || !Number.isInteger(quantity) || quantity <= 0) {
     return res.status(400).json({ message: 'Dados de compra inválidos.' });
+  }
+  if (quantity > MAX_TICKETS_PER_PURCHASE) {
+    return res.status(400).json({ message: `Máximo de ${MAX_TICKETS_PER_PURCHASE} ingressos por compra.` });
+  }
+
+  try {
+    await releasePreviousReservations(req.user._id, eventId);
+  } catch (err) {
+    return purchaseErrorResponse(res, err, 'Erro ao comprar ingresso.');
   }
 
   const session = await mongoose.startSession();
@@ -431,7 +468,7 @@ export async function purchaseTicket(req, res) {
       eventDoc = result.eventDoc;
     });
   } catch (err) {
-    return res.status(err.status || 500).json({ message: err.message || 'Erro ao comprar ingresso.' });
+    return purchaseErrorResponse(res, err, 'Erro ao comprar ingresso.');
   } finally {
     await session.endSession();
   }
@@ -443,8 +480,25 @@ export async function guestPurchase(req, res) {
   const { id: eventId } = req.params;
   const { name, email, ticketTypeId, quantity } = req.body;
 
-  if (!name || !email || !ticketTypeId || !Number.isInteger(quantity) || quantity <= 0) {
-    return res.status(400).json({ message: 'Preencha nome, email e a quantidade de ingressos.' });
+  if (
+    !isNonEmptyString(name) ||
+    !isValidEmail(email) ||
+    !isNonEmptyString(ticketTypeId) ||
+    !Number.isInteger(quantity) ||
+    quantity <= 0
+  ) {
+    return res.status(400).json({ message: 'Preencha nome, email válido e a quantidade de ingressos.' });
+  }
+  if (quantity > MAX_TICKETS_PER_PURCHASE) {
+    return res.status(400).json({ message: `Máximo de ${MAX_TICKETS_PER_PURCHASE} ingressos por compra.` });
+  }
+  const buyerEmail = email.trim().toLowerCase();
+
+  try {
+    const existingBuyer = await User.findOne({ email: buyerEmail });
+    if (existingBuyer) await releasePreviousReservations(existingBuyer._id, eventId);
+  } catch (err) {
+    return purchaseErrorResponse(res, err, 'Erro ao comprar ingresso.');
   }
 
   const session = await mongoose.startSession();
@@ -452,10 +506,10 @@ export async function guestPurchase(req, res) {
   let eventDoc;
   try {
     await session.withTransaction(async () => {
-      let buyer = await User.findOne({ email: email.toLowerCase() }).session(session);
+      let buyer = await User.findOne({ email: buyerEmail }).session(session);
       if (!buyer) {
         const createdUsers = await User.create(
-          [{ name, email: email.toLowerCase(), role: 'buyer' }],
+          [{ name: name.trim().slice(0, 120), email: buyerEmail, role: 'buyer' }],
           { session }
         );
         buyer = createdUsers[0];
@@ -472,10 +526,10 @@ export async function guestPurchase(req, res) {
       eventDoc = result.eventDoc;
     });
   } catch (err) {
-    return res.status(err.status || 500).json({ message: err.message || 'Erro ao comprar ingresso.' });
+    return purchaseErrorResponse(res, err, 'Erro ao comprar ingresso.');
   } finally {
     await session.endSession();
   }
 
-  await startCheckout({ ticketDoc, eventDoc, payerEmail: email, res });
+  await startCheckout({ ticketDoc, eventDoc, payerEmail: buyerEmail, res });
 }

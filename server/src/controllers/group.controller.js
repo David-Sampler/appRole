@@ -4,14 +4,22 @@ import Event from '../models/Event.js';
 import Ticket from '../models/Ticket.js';
 import User from '../models/User.js';
 import { toPublicGroup } from '../utils/serialize.js';
-import { startCheckout } from './event.controller.js';
+import {
+  startCheckout,
+  generateTicketCode,
+  purchaseErrorResponse,
+  releasePreviousReservations,
+} from './event.controller.js';
+import { randomCode, isNonEmptyString, isValidEmail } from '../utils/security.js';
 
 function generateGroupCode() {
-  return Math.random().toString(36).slice(2, 8).toUpperCase();
+  return randomCode(6);
 }
 
-function generateTicketCode() {
-  return Math.random().toString(36).slice(2, 10).toUpperCase();
+// Libera a reserva não paga anterior do mesmo comprador no evento desta mesa.
+async function releaseBuyerPendingForGroup(buyerId, groupId) {
+  const group = await Group.findById(groupId, { event: 1 });
+  if (group) await releasePreviousReservations(buyerId, group.event);
 }
 
 export async function createGroup(req, res) {
@@ -78,8 +86,6 @@ export async function listGroups(req, res) {
   res.json({ groups: groups.map(toPublicGroup) });
 }
 
-const isValidEmail = (email) => typeof email === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-
 async function reserveGroup({ groupId, buyerId, attendees, session }) {
   const group = await Group.findById(groupId).session(session);
   if (!group) {
@@ -131,7 +137,7 @@ async function reserveGroup({ groupId, buyerId, attendees, session }) {
       groupCode: group.code,
       groupName: group.name,
       groupSeatIndex: idx,
-      attendeeName: attendees[idx].name.trim(),
+      attendeeName: attendees[idx].name.trim().slice(0, 120),
       attendeeEmail: attendees[idx].email ? String(attendees[idx].email).toLowerCase().trim() : undefined,
     })),
     { session, ordered: true }
@@ -155,6 +161,12 @@ export async function purchaseGroup(req, res) {
   const { id: groupId } = req.params;
   const { attendees } = req.body;
 
+  try {
+    await releaseBuyerPendingForGroup(req.user._id, groupId);
+  } catch (err) {
+    return purchaseErrorResponse(res, err, 'Erro ao comprar mesa.');
+  }
+
   const session = await mongoose.startSession();
   let result;
   try {
@@ -162,7 +174,7 @@ export async function purchaseGroup(req, res) {
       result = await reserveGroup({ groupId, buyerId: req.user._id, attendees, session });
     });
   } catch (err) {
-    return res.status(err.status || 500).json({ message: err.message || 'Erro ao comprar mesa.' });
+    return purchaseErrorResponse(res, err, 'Erro ao comprar mesa.');
   } finally {
     await session.endSession();
   }
@@ -174,18 +186,26 @@ export async function guestPurchaseGroup(req, res) {
   const { id: groupId } = req.params;
   const { name, email, attendees } = req.body;
 
-  if (!name || !email) {
-    return res.status(400).json({ message: 'Preencha seu nome e email.' });
+  if (!isNonEmptyString(name) || !isValidEmail(email)) {
+    return res.status(400).json({ message: 'Preencha seu nome e um email válido.' });
+  }
+  const buyerEmail = email.trim().toLowerCase();
+
+  try {
+    const existingBuyer = await User.findOne({ email: buyerEmail });
+    if (existingBuyer) await releaseBuyerPendingForGroup(existingBuyer._id, groupId);
+  } catch (err) {
+    return purchaseErrorResponse(res, err, 'Erro ao comprar mesa.');
   }
 
   const session = await mongoose.startSession();
   let result;
   try {
     await session.withTransaction(async () => {
-      let buyer = await User.findOne({ email: email.toLowerCase() }).session(session);
+      let buyer = await User.findOne({ email: buyerEmail }).session(session);
       if (!buyer) {
         const createdUsers = await User.create(
-          [{ name, email: email.toLowerCase(), role: 'buyer' }],
+          [{ name: name.trim().slice(0, 120), email: buyerEmail, role: 'buyer' }],
           { session }
         );
         buyer = createdUsers[0];
@@ -194,12 +214,12 @@ export async function guestPurchaseGroup(req, res) {
       result = await reserveGroup({ groupId, buyerId: buyer._id, attendees, session });
     });
   } catch (err) {
-    return res.status(err.status || 500).json({ message: err.message || 'Erro ao comprar mesa.' });
+    return purchaseErrorResponse(res, err, 'Erro ao comprar mesa.');
   } finally {
     await session.endSession();
   }
 
-  await startCheckout({ ...result, payerEmail: email, res });
+  await startCheckout({ ...result, payerEmail: buyerEmail, res });
 }
 
 export async function checkInGroup(req, res) {
@@ -217,16 +237,19 @@ export async function checkInGroup(req, res) {
     return res.status(404).json({ message: 'Nenhum ingresso pago encontrado para esta mesa.' });
   }
 
+  // atualização atômica: só marca quem ainda não entrou (duas portarias ao mesmo tempo não duplicam)
   const now = new Date();
-  for (const t of tickets) {
-    if (!t.checkedInAt) {
-      t.checkedInAt = now;
-      await t.save();
-    }
-  }
+  const { modifiedCount } = await Ticket.updateMany(
+    { groupId: group._id, status: 'paid', checkedInAt: null },
+    { $set: { checkedInAt: now } }
+  );
+  const updated = await Ticket.find({ groupId: group._id, status: 'paid' }).sort({ groupSeatIndex: 1 });
 
   res.json({
-    message: `Validado(s) ${tickets.length} ingresso(s) da mesa ${group.name}.`,
-    attendees: tickets.map((t) => ({ name: t.attendeeName, checkedInAt: t.checkedInAt })),
+    message:
+      modifiedCount === 0
+        ? `Todos da mesa ${group.name} já tinham entrado.`
+        : `Validado(s) ${modifiedCount} ingresso(s) da mesa ${group.name}.`,
+    attendees: updated.map((t) => ({ name: t.attendeeName, checkedInAt: t.checkedInAt })),
   });
 }

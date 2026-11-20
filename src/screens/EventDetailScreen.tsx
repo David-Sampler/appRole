@@ -85,6 +85,8 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     );
   }
 
+  // mesmo limite do servidor (MAX_TICKETS_PER_PURCHASE)
+  const MAX_TICKETS_PER_PURCHASE = 10;
   const selectedType = event.ticketTypes.find((tt) => tt.id === selectedTypeId);
   const remaining = selectedType
     ? selectedType.quantityAvailable - selectedType.quantitySold
@@ -218,7 +220,7 @@ export default function EventDetailScreen({ route, navigation }: Props) {
             <Text style={styles.qtyText}>{quantity}</Text>
             <Pressable
               style={[styles.qtyButton, { backgroundColor: colors.primaryLight }]}
-              onPress={() => setQuantity((q) => Math.min(remaining, q + 1))}
+              onPress={() => setQuantity((q) => Math.min(remaining, MAX_TICKETS_PER_PURCHASE, q + 1))}
             >
               <Ionicons name="add" size={18} color={colors.primary} />
             </Pressable>

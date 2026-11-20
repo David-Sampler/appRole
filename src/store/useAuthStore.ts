@@ -113,8 +113,12 @@ export const useAuthStore = create<AuthState>((set) => ({
   updateProfile: async (input) => {
     set({ isSubmitting: true });
     try {
-      const { user } = await authApi.updateProfile(input);
-      set({ user });
+      const { user, token } = await authApi.updateProfile(input);
+      if (token) {
+        await persistSession(token, user, set);
+      } else {
+        set({ user });
+      }
     } finally {
       set({ isSubmitting: false });
     }

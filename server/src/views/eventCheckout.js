@@ -77,7 +77,7 @@ export function eventCheckoutPage(event, groups = []) {
         <select id="ticketType" required>${ticketOptions}</select>
 
         <label>Quantidade</label>
-        <input id="quantity" type="number" min="1" value="1" required />
+        <input id="quantity" type="number" min="1" max="10" value="1" required />
 
         <button type="submit" id="submit-btn">Comprar</button>
         <p id="feedback"></p>

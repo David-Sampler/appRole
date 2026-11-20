@@ -39,7 +39,8 @@ export interface UpdateProfileInput {
 }
 
 export function updateProfile(input: UpdateProfileInput) {
-  return request<{ user: User }>('/auth/me', { method: 'PATCH', body: input });
+  // `token` só vem quando a senha foi trocada (o servidor invalida os tokens antigos)
+  return request<{ user: User; token?: string }>('/auth/me', { method: 'PATCH', body: input });
 }
 
 export function verifyEmail(code: string) {
