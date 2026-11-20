@@ -16,6 +16,8 @@ const ticketSchema = new mongoose.Schema(
       enum: ['pending_payment', 'paid', 'cancelled'],
       default: 'pending_payment',
     },
+    // why a ticket ended up cancelled: checkout_failed | expired | payment_rejected | expired_refunded
+    cancelReason: { type: String },
     paymentId: { type: String },
     paymentPreferenceId: { type: String },
     // Group/table support

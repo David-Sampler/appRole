@@ -50,12 +50,16 @@ export async function createPaymentPreference({
   payerEmail,
   sellerAccessToken,
   marketplaceFee,
+  expiresAt,
 }) {
   if (!sellerAccessToken) {
     throw new Error('Organizador não conectou uma conta de pagamento.');
   }
   const sellerClient = new MercadoPagoConfig({ accessToken: sellerAccessToken });
   const preference = new Preference(sellerClient);
+  const expiration = expiresAt
+    ? { expires: true, expiration_date_from: new Date().toISOString(), expiration_date_to: expiresAt.toISOString() }
+    : {};
 
   const response = await preference.create({
     body: {
@@ -78,6 +82,7 @@ export async function createPaymentPreference({
       },
       auto_return: 'approved',
       notification_url: `${publicBaseUrl}/api/payments/webhook`,
+      ...expiration,
     },
   });
 

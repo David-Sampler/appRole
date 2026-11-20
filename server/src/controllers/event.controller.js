@@ -5,17 +5,22 @@ import Group from '../models/Group.js';
 import User from '../models/User.js';
 import { toPublicEvent, toPublicTicket } from '../utils/serialize.js';
 import { createPaymentPreference, isPaymentsConfigured } from '../utils/mercadopago.js';
+import { RESERVATION_TTL_MS } from '../config/reservation.js';
+
+// Texto digitado pelo usuário vira busca literal (ex: "Recife(" não quebra a regex).
+const escapeRegex = (text) => String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 export async function listEvents(req, res) {
   const { search, category, city } = req.query;
   const filter = { status: 'active' };
   if (category) filter.category = category;
-  if (city) filter.city = { $regex: `^${city}$`, $options: 'i' };
+  if (city) filter.city = { $regex: `^${escapeRegex(city)}$`, $options: 'i' };
   if (search) {
+    const pattern = escapeRegex(search);
     filter.$or = [
-      { title: { $regex: search, $options: 'i' } },
-      { location: { $regex: search, $options: 'i' } },
-      { city: { $regex: search, $options: 'i' } },
+      { title: { $regex: pattern, $options: 'i' } },
+      { location: { $regex: pattern, $options: 'i' } },
+      { city: { $regex: pattern, $options: 'i' } },
     ];
   }
   const events = await Event.find(filter).sort({ createdAt: -1 });
@@ -260,9 +265,14 @@ function generateTicketCode() {
 
 async function reserveTicket({ eventId, ticketTypeId, quantity, buyerId, session }) {
   const event = await Event.findById(eventId).session(session);
-  if (!event) {
+  if (!event || event.status === 'deleted') {
     const err = new Error('Evento não encontrado.');
     err.status = 404;
+    throw err;
+  }
+  if (event.status !== 'active') {
+    const err = new Error('Este evento foi cancelado e não está mais vendendo ingressos.');
+    err.status = 409;
     throw err;
   }
   const ticketType = event.ticketTypes.id(ticketTypeId);
@@ -301,7 +311,8 @@ async function reserveTicket({ eventId, ticketTypeId, quantity, buyerId, session
   return { ticketDoc, eventDoc: event };
 }
 
-export async function releaseReservation(ticketId) {
+// Cancela uma reserva pendente e devolve estoque/mesa. `reason` fica salvo em ticket.cancelReason.
+export async function releaseReservation(ticketId, reason = 'checkout_failed') {
   const ticket = await Ticket.findById(ticketId);
   if (!ticket) return;
 
@@ -330,7 +341,10 @@ export async function releaseReservation(ticketId) {
       }
     }
 
-    await Ticket.updateMany({ reservationId: ticket.reservationId, status: 'pending_payment' }, { $set: { status: 'cancelled' } });
+    await Ticket.updateMany(
+      { reservationId: ticket.reservationId, status: 'pending_payment' },
+      { $set: { status: 'cancelled', cancelReason: reason } }
+    );
     return;
   }
 
@@ -345,6 +359,7 @@ export async function releaseReservation(ticketId) {
     }
   }
   ticket.status = 'cancelled';
+  ticket.cancelReason = reason;
   await ticket.save();
 }
 
@@ -378,6 +393,8 @@ export async function startCheckout({ ticketDoc, eventDoc, payerEmail, res, char
       payerEmail,
       sellerAccessToken: organizer.mpAccessToken,
       marketplaceFee,
+      // o link de pagamento vence junto com a reserva
+      expiresAt: new Date(ticketDoc.createdAt.getTime() + RESERVATION_TTL_MS),
     });
 
     ticketDoc.paymentPreferenceId = preferenceId;

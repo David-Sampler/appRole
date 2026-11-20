@@ -9,6 +9,7 @@ import paymentRoutes from './routes/payment.routes.js';
 import uploadRoutes from './routes/upload.routes.js';
 import publicRoutes from './routes/public.routes.js';
 import groupRoutes from './routes/group.routes.js';
+import { startReservationSweeper } from './utils/reservationSweeper.js';
 
 const app = express();
 
@@ -35,6 +36,7 @@ const PORT = process.env.PORT || 4000;
 connectDB()
   .then(() => {
     app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
+    startReservationSweeper();
   })
   .catch((err) => {
     console.error('Falha ao conectar no MongoDB:', err.message);
