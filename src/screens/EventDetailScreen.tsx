@@ -98,11 +98,16 @@ export default function EventDetailScreen({ route, navigation }: Props) {
     setIsBuying(true);
     try {
       const { checkoutUrl } = await purchaseTicket(event.id, selectedType.id, quantity);
-      await WebBrowser.openBrowserAsync(checkoutUrl);
-      Alert.alert(
-        'Pagamento em andamento',
-        'Assim que o pagamento for confirmado, seu ingresso aparecerá em "Meus Ingressos".'
-      );
+      if (checkoutUrl) {
+        await WebBrowser.openBrowserAsync(checkoutUrl);
+        Alert.alert(
+          'Pagamento em andamento',
+          'Assim que o pagamento for confirmado, seu ingresso aparecerá em "Meus Ingressos".'
+        );
+      } else {
+        // ingresso gratuito: já sai confirmado, sem passar pelo pagamento
+        Alert.alert('Ingresso garantido!', 'Seu ingresso gratuito já está em "Meus Ingressos".');
+      }
       setQuantity(1);
       fetchEvent();
     } catch (err) {

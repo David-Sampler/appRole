@@ -7,9 +7,44 @@ import { toPublicEvent, toPublicTicket } from '../utils/serialize.js';
 import { createPaymentPreference, isPaymentsConfigured } from '../utils/mercadopago.js';
 import { RESERVATION_TTL_MS } from '../config/reservation.js';
 import { randomCode, decryptSecret, isNonEmptyString, isValidEmail } from '../utils/security.js';
+import { releaseReservation, markReservationPaid } from '../services/reservations.js';
+import { sendPurchaseConfirmations } from '../services/confirmations.js';
+
+export { releaseReservation };
 
 // Texto digitado pelo usuário vira busca literal (ex: "Recife(" não quebra a regex).
-const escapeRegex = (text) => String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+// Caracteres de controle (ex.: \0) são removidos: o Mongo recusa regex com byte nulo.
+const escapeRegex = (text) =>
+  String(text)
+    .replace(/[\u0000-\u001f]/g, '')
+    .replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// Formato usado pelo app: data AAAA-MM-DD (válida no calendário) e hora HH:MM.
+function isValidDate(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const d = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
+}
+const isValidTime = (value) => typeof value === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+
+function validateEventFields(body, current) {
+  const { title, description, category, date, time, location, city, ticketTypes } = body;
+  const texts = [title, description, category, location, city];
+  if (!texts.every(isNonEmptyString) || !date || !time) {
+    return 'Preencha todos os campos do evento, incluindo a cidade.';
+  }
+  // na edição, aceita a data/hora que já estava salva (eventos antigos em outro formato)
+  if (!isValidDate(date) && date !== current?.date) return 'Data inválida. Use o formato AAAA-MM-DD.';
+  if (!isValidTime(time) && time !== current?.time) return 'Horário inválido. Use o formato HH:MM.';
+  if (!Array.isArray(ticketTypes) || ticketTypes.length === 0) return 'Adicione pelo menos um tipo de ingresso.';
+  for (const tt of ticketTypes) {
+    if (!tt || !isNonEmptyString(tt.name) || typeof tt.price !== 'number' || !Number.isFinite(tt.price) || tt.price < 0) {
+      return 'Tipo de ingresso inválido.';
+    }
+    if (!Number.isInteger(tt.quantityAvailable) || tt.quantityAvailable <= 0) return 'Quantidade de ingresso inválida.';
+  }
+  return null;
+}
 
 export async function listEvents(req, res) {
   const { search, category, city } = req.query;
@@ -84,19 +119,10 @@ export async function createEvent(req, res) {
 
   const { title, description, category, date, time, location, city, imageUrl, ticketTypes } = req.body;
 
-  if (!title || !description || !category || !date || !time || !location || !city) {
-    return res.status(400).json({ message: 'Preencha todos os campos do evento, incluindo a cidade.' });
-  }
-  if (!Array.isArray(ticketTypes) || ticketTypes.length === 0) {
-    return res.status(400).json({ message: 'Adicione pelo menos um tipo de ingresso.' });
-  }
-  for (const tt of ticketTypes) {
-    if (!tt.name || typeof tt.price !== 'number' || tt.price < 0) {
-      return res.status(400).json({ message: 'Tipo de ingresso inválido.' });
-    }
-    if (!Number.isInteger(tt.quantityAvailable) || tt.quantityAvailable <= 0) {
-      return res.status(400).json({ message: 'Quantidade de ingresso inválida.' });
-    }
+  const invalid = validateEventFields(req.body);
+  if (invalid) return res.status(400).json({ message: invalid });
+  if (imageUrl !== undefined && imageUrl !== null && typeof imageUrl !== 'string') {
+    return res.status(400).json({ message: 'Imagem inválida.' });
   }
 
   const event = await Event.create({
@@ -122,61 +148,68 @@ export async function createEvent(req, res) {
 }
 
 export async function updateEvent(req, res) {
-  const event = await Event.findById(req.params.id);
-  if (!event) return res.status(404).json({ message: 'Evento não encontrado.' });
-  if (event.organizer.toString() !== req.user._id.toString()) {
+  const current = await Event.findById(req.params.id);
+  if (!current) return res.status(404).json({ message: 'Evento não encontrado.' });
+  if (current.organizer.toString() !== req.user._id.toString()) {
     return res.status(403).json({ message: 'Você não é o organizador deste evento.' });
   }
-  if (event.status === 'cancelled') {
+  if (current.status === 'cancelled') {
     return res.status(409).json({ message: 'Este evento foi cancelado e não pode ser editado.' });
   }
 
   const { title, description, category, date, time, location, city, imageUrl, ticketTypes } = req.body;
+  const invalid = validateEventFields(req.body, current);
+  if (invalid) return res.status(400).json({ message: invalid });
 
-  if (!title || !description || !category || !date || !time || !location || !city) {
-    return res.status(400).json({ message: 'Preencha todos os campos do evento, incluindo a cidade.' });
+  // Transação: o estoque vendido é relido aqui dentro, então uma compra que acontece
+  // durante a edição não é apagada (antes a edição regravava quantitySold com valor velho).
+  const session = await mongoose.startSession();
+  let saved;
+  try {
+    await session.withTransaction(async () => {
+      const event = await Event.findById(current._id).session(session);
+      const existingTypesById = new Map(event.ticketTypes.map((tt) => [tt._id.toString(), tt]));
+      const keptIds = new Set();
+      const nextTicketTypes = [];
+      for (const tt of ticketTypes) {
+        const existing = typeof tt.id === 'string' ? existingTypesById.get(tt.id) : null;
+        const quantitySold = existing?.quantitySold ?? 0;
+        if (tt.quantityAvailable < quantitySold) {
+          throw Object.assign(new Error(`A quantidade de "${tt.name}" não pode ser menor que ${quantitySold} (já vendidos).`), { status: 400 });
+        }
+        if (existing) keptIds.add(existing._id.toString());
+        nextTicketTypes.push(
+          existing
+            ? { _id: existing._id, name: tt.name, price: tt.price, quantityAvailable: tt.quantityAvailable, quantitySold }
+            : { name: tt.name, price: tt.price, quantityAvailable: tt.quantityAvailable, quantitySold: 0 }
+        );
+      }
+      // não deixa sumir um tipo que já tem ingressos vendidos ou reservados
+      const removedWithSales = event.ticketTypes.find((tt) => !keptIds.has(tt._id.toString()) && tt.quantitySold > 0);
+      if (removedWithSales) {
+        throw Object.assign(
+          new Error(`O ingresso "${removedWithSales.name}" já tem vendas e não pode ser removido. Reduza a quantidade em vez disso.`),
+          { status: 400 }
+        );
+      }
+
+      event.title = title;
+      event.description = description;
+      event.category = category;
+      event.date = date;
+      event.time = time;
+      event.location = location;
+      event.city = city;
+      if (typeof imageUrl === 'string' && imageUrl) event.imageUrl = imageUrl;
+      event.ticketTypes = nextTicketTypes;
+      saved = await event.save({ session });
+    });
+  } catch (err) {
+    return purchaseErrorResponse(res, err, 'Não foi possível salvar o evento.');
+  } finally {
+    await session.endSession();
   }
-  if (!Array.isArray(ticketTypes) || ticketTypes.length === 0) {
-    return res.status(400).json({ message: 'Adicione pelo menos um tipo de ingresso.' });
-  }
-
-  const existingTypesById = new Map(event.ticketTypes.map((tt) => [tt._id.toString(), tt]));
-  const nextTicketTypes = [];
-  for (const tt of ticketTypes) {
-    if (!tt.name || typeof tt.price !== 'number' || tt.price < 0) {
-      return res.status(400).json({ message: 'Tipo de ingresso inválido.' });
-    }
-    if (!Number.isInteger(tt.quantityAvailable) || tt.quantityAvailable <= 0) {
-      return res.status(400).json({ message: 'Quantidade de ingresso inválida.' });
-    }
-
-    const existing = tt.id ? existingTypesById.get(tt.id) : null;
-    const quantitySold = existing?.quantitySold ?? 0;
-    if (tt.quantityAvailable < quantitySold) {
-      return res.status(400).json({
-        message: `A quantidade de "${tt.name}" não pode ser menor que ${quantitySold} (já vendidos).`,
-      });
-    }
-
-    nextTicketTypes.push(
-      existing
-        ? { _id: existing._id, name: tt.name, price: tt.price, quantityAvailable: tt.quantityAvailable, quantitySold }
-        : { name: tt.name, price: tt.price, quantityAvailable: tt.quantityAvailable, quantitySold: 0 }
-    );
-  }
-
-  event.title = title;
-  event.description = description;
-  event.category = category;
-  event.date = date;
-  event.time = time;
-  event.location = location;
-  event.city = city;
-  event.imageUrl = imageUrl || event.imageUrl;
-  event.ticketTypes = nextTicketTypes;
-
-  await event.save();
-  res.json({ event: toPublicEvent(event) });
+  res.json({ event: toPublicEvent(saved) });
 }
 
 export async function cancelEvent(req, res) {
@@ -191,6 +224,16 @@ export async function cancelEvent(req, res) {
 
   event.status = 'cancelled';
   await event.save();
+
+  // reservas que ainda não foram pagas são canceladas: ninguém paga por um evento cancelado
+  const pending = await Ticket.find({ event: event._id, status: 'pending_payment', paymentId: { $exists: false } });
+  const seen = new Set();
+  for (const t of pending) {
+    const key = String(t.reservationId ?? t._id);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    await releaseReservation(t._id, 'event_cancelled');
+  }
 
   res.json({ event: toPublicEvent(event) });
 }
@@ -243,6 +286,13 @@ export async function purgeEvent(req, res) {
   }
   if (event.status !== 'deleted') {
     return res.status(409).json({ message: 'Somente eventos removidos podem ser apagados definitivamente.' });
+  }
+  // apagar de vez levaria junto ingressos pagos (sem reembolso) e reservas com pagamento em curso
+  const activeTickets = await Ticket.countDocuments({ event: event._id, status: { $in: ['paid', 'pending_payment'] } });
+  if (activeTickets > 0) {
+    return res.status(409).json({
+      message: 'Este evento tem ingressos pagos ou aguardando pagamento e não pode ser apagado definitivamente.',
+    });
   }
 
   const session = await mongoose.startSession();
@@ -338,61 +388,19 @@ async function reserveTicket({ eventId, ticketTypeId, quantity, buyerId, session
   return { ticketDoc, eventDoc: event };
 }
 
-// Cancela uma reserva pendente e devolve estoque/mesa. `reason` fica salvo em ticket.cancelReason.
-export async function releaseReservation(ticketId, reason = 'checkout_failed') {
-  const ticket = await Ticket.findById(ticketId);
-  if (!ticket) return;
-
-  if (ticket.reservationId) {
-    // cancel all tickets in reservation
-    const tickets = await Ticket.find({ reservationId: ticket.reservationId, status: 'pending_payment' });
-    if (!tickets || tickets.length === 0) return;
-    const event = await Event.findById(ticket.event);
-    if (event && ticket.ticketTypeId) {
-      const ticketType = event.ticketTypes.id(ticket.ticketTypeId);
-      if (ticketType) {
-        const qty = tickets.length;
-        ticketType.quantitySold = Math.max(0, ticketType.quantitySold - qty);
-        await event.save();
-      }
-    }
-
-    // restore group seats if any
-    const groupId = ticket.groupId;
-    if (groupId) {
-      const group = await Group.findById(groupId);
-      if (group) {
-        group.seatsLeft = Math.min(group.size, group.seatsLeft + tickets.length);
-        if (group.seatsLeft >= group.size) group.status = 'available';
-        await group.save();
-      }
-    }
-
-    await Ticket.updateMany(
-      { reservationId: ticket.reservationId, status: 'pending_payment' },
-      { $set: { status: 'cancelled', cancelReason: reason } }
-    );
-    return;
-  }
-
-  if (ticket.status !== 'pending_payment') return;
-
-  const event = await Event.findById(ticket.event);
-  if (event && ticket.ticketTypeId) {
-    const ticketType = event.ticketTypes.id(ticket.ticketTypeId);
-    if (ticketType) {
-      ticketType.quantitySold = Math.max(0, ticketType.quantitySold - ticket.quantity);
-      await event.save();
-    }
-  }
-  ticket.status = 'cancelled';
-  ticket.cancelReason = reason;
-  await ticket.save();
-}
-
 const PLATFORM_FEE_PERCENT = Number(process.env.PLATFORM_FEE_PERCENT || 0);
 
 export async function startCheckout({ ticketDoc, eventDoc, payerEmail, res, chargeAmount }) {
+  const amount = chargeAmount ?? ticketDoc.totalPaid;
+
+  // Ingresso grátis: não passa pelo Mercado Pago (que não aceita cobrança de R$ 0); já sai pago.
+  if (amount === 0) {
+    const paid = await markReservationPaid(ticketDoc, null);
+    if (paid) sendPurchaseConfirmations(paid, eventDoc).catch(() => {});
+    const ticket = paid?.[0] ?? ticketDoc;
+    return res.status(201).json({ ticket: toPublicTicket(ticket), checkoutUrl: null, free: true });
+  }
+
   if (!isPaymentsConfigured()) {
     await releaseReservation(ticketDoc._id);
     return res.status(503).json({
@@ -409,8 +417,6 @@ export async function startCheckout({ ticketDoc, eventDoc, payerEmail, res, char
     });
   }
 
-  const amount = chargeAmount ?? ticketDoc.totalPaid;
-
   try {
     const marketplaceFee = Math.round(amount * (PLATFORM_FEE_PERCENT / 100) * 100) / 100;
     const { preferenceId, checkoutUrl } = await createPaymentPreference({
@@ -425,8 +431,8 @@ export async function startCheckout({ ticketDoc, eventDoc, payerEmail, res, char
       expiresAt: new Date(ticketDoc.createdAt.getTime() + RESERVATION_TTL_MS),
     });
 
+    await Ticket.updateOne({ _id: ticketDoc._id }, { $set: { paymentPreferenceId: preferenceId } });
     ticketDoc.paymentPreferenceId = preferenceId;
-    await ticketDoc.save();
 
     res.status(201).json({ ticket: toPublicTicket(ticketDoc), checkoutUrl });
   } catch (err) {

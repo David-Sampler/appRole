@@ -44,11 +44,18 @@ export default function PurchaseGroupScreen({ route, navigation }: Props) {
     try {
       const payload = trimmed.map((a) => ({ name: a.name, email: a.email || undefined }));
       const { checkoutUrl } = await purchaseGroup(groupId, payload);
-      await WebBrowser.openBrowserAsync(checkoutUrl);
-      Alert.alert(
-        'Pagamento em andamento',
-        'Assim que o pagamento for confirmado, quem tiver email recebe o QR code automaticamente. Os demais aparecem em "Meus Ingressos" pra você compartilhar.'
-      );
+      if (checkoutUrl) {
+        await WebBrowser.openBrowserAsync(checkoutUrl);
+        Alert.alert(
+          'Pagamento em andamento',
+          'Assim que o pagamento for confirmado, quem tiver email recebe o QR code automaticamente. Os demais aparecem em "Meus Ingressos" pra você compartilhar.'
+        );
+      } else {
+        Alert.alert(
+          'Mesa garantida!',
+          'A mesa é gratuita e já está confirmada. Quem tiver email recebe o QR code; os demais aparecem em "Meus Ingressos".'
+        );
+      }
       navigation.goBack();
     } catch (err) {
       const message = err instanceof ApiError ? err.message : 'Não foi possível comprar a mesa.';

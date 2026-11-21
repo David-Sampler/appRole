@@ -1,10 +1,9 @@
 import Ticket from '../models/Ticket.js';
 import Event from '../models/Event.js';
 import User from '../models/User.js';
-import Group from '../models/Group.js';
 import { getPayment, getOAuthAuthorizationUrl, exchangeOAuthCode, refundPayment } from '../utils/mercadopago.js';
-import { releaseReservation } from './event.controller.js';
-import { sendTicketConfirmationEmail } from '../utils/mailer.js';
+import { releaseReservation, markReservationPaid, reclaimReservation, leaderIdOf } from '../services/reservations.js';
+import { sendPurchaseConfirmations } from '../services/confirmations.js';
 import { signOAuthState, verifyOAuthState } from '../utils/jwt.js';
 import { pageLayout } from '../views/layout.js';
 import { encryptSecret, decryptSecret } from '../utils/security.js';
@@ -45,7 +44,7 @@ function paymentMatchesTickets(payment, tickets, organizer) {
 }
 
 // motivos de cancelamento em que a pessoa ainda pode pagar e recuperar a vaga
-const RECLAIMABLE_REASONS = ['expired', 'replaced'];
+const RECLAIMABLE_REASONS = ['expired', 'replaced', 'payment_rejected'];
 
 export async function connectMercadoPago(req, res) {
   const state = signOAuthState(req.user._id.toString());
@@ -92,11 +91,36 @@ export async function mercadoPagoCallback(req, res) {
   );
 }
 
+
+// Motivos de cancelamento que já são finais (dinheiro devolvido / cancelado pelo comprador / em processamento).
+const FINAL_REASONS = ['expired_refunded', 'event_cancelled_refunded', 'refunded_unfulfilled', 'buyer_cancelled', 'reclaiming', 'refunding'];
+
+// Devolve o dinheiro de um pagamento que não virou ingresso. A trava (cancelReason → 'refunding')
+// garante um único reembolso mesmo com avisos duplicados. Lança erro se o reembolso falhar.
+async function refundUnfulfilled({ leaderId, fromReason, revertTo, finalReason, paymentId, organizer }) {
+  const locked = await Ticket.findOneAndUpdate(
+    { _id: leaderId, status: 'cancelled', cancelReason: fromReason },
+    { $set: { cancelReason: 'refunding' } }
+  );
+  if (!locked) return false;
+  try {
+    await refundPayment(paymentId, decryptSecret(organizer?.mpAccessToken));
+  } catch (err) {
+    await Ticket.updateOne({ _id: leaderId }, { $set: { cancelReason: revertTo ?? fromReason } });
+    throw err;
+  }
+  await Ticket.updateMany(
+    { $or: [{ _id: leaderId }, { reservationId: leaderId }] },
+    { $set: { cancelReason: finalReason, paymentId } }
+  );
+  return true;
+}
+
 export async function paymentWebhook(req, res) {
   const type = req.body?.type || req.query.type;
   const paymentId = req.body?.data?.id || req.query['data.id'];
 
-  if (type !== 'payment' || !paymentId) {
+  if (type !== 'payment' || !paymentId || (typeof paymentId !== 'string' && typeof paymentId !== 'number')) {
     return res.status(200).send('ignored');
   }
   if (!hasValidWebhookSignature(req)) {
@@ -112,23 +136,15 @@ export async function paymentWebhook(req, res) {
     return res.status(200).send('error fetching payment');
   }
 
-  const ticketId = payment.external_reference;
-  // external_reference é o id do ingresso; numa mesa, é o id do 1º ingresso, que também é o
-  // reservationId — então buscamos todos os ingressos da reserva, não só o primeiro
-  let tickets = [];
-  if (ticketId) {
-    const single = await Ticket.findById(ticketId).catch(() => null);
-    if (single?.reservationId) tickets = await Ticket.find({ reservationId: single.reservationId });
-    else if (single) tickets = [single];
-    else tickets = await Ticket.find({ reservationId: ticketId }).catch(() => []);
-  }
-
-  if (!tickets || tickets.length === 0) {
-    return res.status(200).send('ticket not found');
-  }
+  // external_reference é o id do ingresso; numa mesa, é o id do 1º ingresso (= reservationId)
+  const ticketId = payment?.external_reference;
+  const first = ticketId ? await Ticket.findById(ticketId).catch(() => null) : null;
+  if (!first) return res.status(200).send('ticket not found');
+  const leaderId = leaderIdOf(first);
+  const tickets = first.reservationId ? await Ticket.find({ reservationId: leaderId }) : [first];
 
   const paymentIdStr = String(payment.id);
-  const ticketEvent = await Event.findById(tickets[0].event);
+  const ticketEvent = await Event.findById(first.event);
   const organizer = ticketEvent ? await User.findById(ticketEvent.organizer) : null;
 
   const mismatch = paymentMatchesTickets(payment, tickets, organizer);
@@ -137,102 +153,66 @@ export async function paymentWebhook(req, res) {
     return res.status(200).send('payment does not match purchase');
   }
 
-  const expiredBeforePayment = tickets.every(
-    (t) => t.status === 'cancelled' && RECLAIMABLE_REASONS.includes(t.cancelReason)
-  );
+  const ids = tickets.map((t) => t._id);
 
-  if (payment.status === 'approved' && expiredBeforePayment) {
-    // pagou depois que a reserva venceu: tenta segurar a vaga de novo; se não der, devolve o dinheiro
-    const reclaimed = await reclaimExpiredReservation(tickets);
-    if (!reclaimed) {
-      try {
-        await refundPayment(paymentIdStr, decryptSecret(organizer?.mpAccessToken));
-        await Ticket.updateMany(
-          { _id: { $in: tickets.map((t) => t._id) } },
-          { $set: { paymentId: paymentIdStr, cancelReason: 'expired_refunded' } }
-        );
-      } catch (err) {
-        console.error(`Pagamento ${paymentIdStr} aprovado após reserva expirar e o reembolso falhou:`, err.message);
-        return res.status(500).send('refund failed'); // o Mercado Pago tenta notificar de novo
-      }
-      return res.status(200).send('expired reservation refunded');
+  if (payment.status === 'rejected' || payment.status === 'cancelled') {
+    // devolve estoque/mesa (só quem vencer a trava do líder processa)
+    if (await releaseReservation(leaderId, 'payment_rejected')) {
+      await Ticket.updateMany({ _id: { $in: ids } }, { $set: { paymentId: paymentIdStr } });
     }
-  } else if (!tickets.every((t) => t.status === 'pending_payment')) {
+    return res.status(200).send('ok');
+  }
+
+  if (payment.status !== 'approved') {
+    // "pending"/"in_process" (Pix/boleto aguardando): guarda o pagamento para a reserva não expirar
+    await Ticket.updateMany({ _id: { $in: ids }, status: 'pending_payment' }, { $set: { paymentId: paymentIdStr } });
+    return res.status(200).send('ok');
+  }
+
+  // ---- pagamento aprovado ----
+  const eventActive = ticketEvent?.status === 'active';
+  if (!eventActive) await releaseReservation(leaderId, 'event_cancelled');
+
+  let paid = eventActive ? await markReservationPaid(first, paymentIdStr) : null;
+  if (paid) {
+    sendPurchaseConfirmations(paid, ticketEvent).catch(() => {});
+    return res.status(200).send('ok');
+  }
+
+  // não estava mais pendente: já pago, ou cancelado (expirou, foi substituído, recusado antes...)
+  const leader = await Ticket.findById(leaderId);
+  if (!leader || leader.status === 'paid') return res.status(200).send('already processed');
+  if (leader.status !== 'cancelled' || FINAL_REASONS.includes(leader.cancelReason)) {
     return res.status(200).send('already processed');
   }
 
-  if (payment.status === 'approved') {
-    for (const t of tickets) {
-      t.status = 'paid';
-      t.paymentId = String(payment.id);
-      await t.save();
+  try {
+    if (eventActive && RECLAIMABLE_REASONS.includes(leader.cancelReason)) {
+      // pagou depois que a reserva venceu: tenta segurar a vaga de novo
+      const claim = await reclaimReservation(leader, RECLAIMABLE_REASONS, paymentIdStr);
+      if (claim.result === 'busy') return res.status(200).send('already processed');
+      if (claim.result === 'reclaimed') {
+        paid = await markReservationPaid(leader, paymentIdStr);
+        if (paid) sendPurchaseConfirmations(paid, ticketEvent).catch(() => {});
+        return res.status(200).send('ok');
+      }
+      // vaga não existe mais: devolve o dinheiro
+      await refundUnfulfilled({
+        leaderId, fromReason: 'reclaiming', revertTo: claim.originalReason,
+        finalReason: 'expired_refunded', paymentId: paymentIdStr, organizer,
+      });
+      return res.status(200).send('expired reservation refunded');
     }
 
-    const event = await Event.findById(tickets[0].event);
-    const isGroupPurchase = tickets.some((t) => t.groupId);
-
-    if (event && isGroupPurchase) {
-      // mesa: cada pessoa recebe seu próprio ingresso/QR code por email
-      for (const t of tickets) {
-        if (!t.attendeeEmail) continue;
-        sendTicketConfirmationEmail(t.attendeeEmail, {
-          event,
-          ticketTypeName: t.ticketTypeName,
-          quantity: 1,
-          totalPaid: t.totalPaid || 0,
-          code: t.code,
-        }).catch((err) => console.error(`Falha ao enviar email da mesa para ${t.attendeeEmail}:`, err.message));
-      }
-    } else if (event) {
-      const buyer = await User.findById(tickets[0].buyer);
-      if (buyer) {
-        sendTicketConfirmationEmail(buyer.email, {
-          event,
-          ticketTypeName: tickets[0].ticketTypeName,
-          quantity: tickets.length,
-          totalPaid: tickets.reduce((s, x) => s + (x.totalPaid || 0), 0),
-          code: tickets[0].code,
-        }).catch((err) => console.error('Falha ao enviar email de confirmação:', err.message));
-      }
-    }
-  } else if (payment.status === 'rejected' || payment.status === 'cancelled') {
-    // devolve o estoque pela quantidade real do ingresso (antes contava 1 por documento) e libera a mesa
-    await releaseReservation(tickets[0]._id, 'payment_rejected');
-    await Ticket.updateMany({ _id: { $in: tickets.map((t) => t._id) } }, { $set: { paymentId: paymentIdStr } });
-  } else {
-    // "pending"/"in_process" (ex: Pix ou boleto aguardando): guarda o pagamento para a reserva
-    // não ser expirada enquanto o Mercado Pago não confirma ou cancela
-    await Ticket.updateMany({ _id: { $in: tickets.map((t) => t._id) } }, { $set: { paymentId: paymentIdStr } });
+    // evento cancelado (ou reserva sem volta): devolve o dinheiro
+    const refunded = await refundUnfulfilled({
+      leaderId, fromReason: leader.cancelReason,
+      finalReason: eventActive ? 'refunded_unfulfilled' : 'event_cancelled_refunded',
+      paymentId: paymentIdStr, organizer,
+    });
+    return res.status(200).send(refunded ? 'refunded' : 'already processed');
+  } catch (err) {
+    console.error(`Pagamento ${paymentIdStr}: reembolso falhou:`, err.message);
+    return res.status(500).send('refund failed'); // o Mercado Pago tenta notificar de novo
   }
-
-  res.status(200).send('ok');
-}
-
-// Volta a reservar estoque/mesa para ingressos que expiraram antes do pagamento ser aprovado.
-// Retorna true se conseguiu (os ingressos voltam a "pending_payment" para serem marcados como pagos).
-async function reclaimExpiredReservation(tickets) {
-  const event = await Event.findById(tickets[0].event);
-  if (!event || event.status !== 'active') return false;
-
-  const groupId = tickets[0].groupId;
-  if (groupId) {
-    const group = await Group.findOneAndUpdate(
-      { _id: groupId, status: 'available', size: tickets.length },
-      { $set: { status: 'sold', seatsLeft: 0 } },
-      { new: true }
-    );
-    if (!group) return false;
-  } else {
-    const ticketType = event.ticketTypes.id(tickets[0].ticketTypeId);
-    const quantity = tickets[0].quantity;
-    if (!ticketType || ticketType.quantityAvailable - ticketType.quantitySold < quantity) return false;
-    ticketType.quantitySold += quantity;
-    await event.save();
-  }
-
-  for (const t of tickets) {
-    t.status = 'pending_payment';
-    t.cancelReason = undefined;
-  }
-  return true;
 }

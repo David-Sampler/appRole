@@ -97,7 +97,7 @@ export async function googleAuth(req, res) {
   const { idToken, role } = req.body;
   if (!isNonEmptyString(idToken)) return res.status(400).json({ message: 'idToken ausente.' });
   if (googleClientIds.length === 0) {
-    return res.status(500).json({ message: 'Login com Google não configurado no servidor.' });
+    return res.status(503).json({ message: 'Login com Google não configurado no servidor.' });
   }
 
   let payload;

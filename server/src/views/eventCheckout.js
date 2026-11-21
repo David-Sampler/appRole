@@ -115,7 +115,7 @@ export function eventCheckoutPage(event, groups = []) {
           const data = await res.json();
           if (!res.ok) throw new Error(data.message || 'Não foi possível comprar.');
 
-          window.location.href = data.checkoutUrl;
+          window.location.href = data.checkoutUrl || ('/t/' + data.ticket.code); // grátis: vai direto ao ingresso
         } catch (err) {
           feedback.textContent = err.message;
           feedback.className = 'error';
@@ -200,7 +200,7 @@ export function eventCheckoutPage(event, groups = []) {
             const data = await res.json();
             if (!res.ok) throw new Error(data.message || 'Não foi possível comprar.');
 
-            window.location.href = data.checkoutUrl;
+            window.location.href = data.checkoutUrl || ('/t/' + data.ticket.code); // grátis: vai direto ao ingresso
           } catch (err) {
             groupFeedback.textContent = err.message;
             groupFeedback.className = 'error';

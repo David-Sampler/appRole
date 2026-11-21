@@ -231,6 +231,9 @@ export async function checkInGroup(req, res) {
   if (!event || event.organizer.toString() !== req.user._id.toString()) {
     return res.status(403).json({ message: 'Você não é o organizador deste evento.' });
   }
+  if (event.status !== 'active') {
+    return res.status(409).json({ message: 'Este evento foi cancelado. A entrada não pode ser validada.' });
+  }
 
   const tickets = await Ticket.find({ groupId: group._id, status: 'paid' }).sort({ groupSeatIndex: 1 });
   if (!tickets || tickets.length === 0) {

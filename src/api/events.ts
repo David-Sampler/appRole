@@ -75,7 +75,7 @@ export function purgeEvent(eventId: string) {
 }
 
 export function purchaseTicket(eventId: string, ticketTypeId: string, quantity: number) {
-  return request<{ ticket: import('../types').PurchasedTicket; checkoutUrl: string }>(
+  return request<{ ticket: import('../types').PurchasedTicket; checkoutUrl: string | null; free?: boolean }>(
     `/events/${eventId}/purchase`,
     { method: 'POST', body: { ticketTypeId, quantity } }
   );

@@ -30,7 +30,7 @@ export interface GroupAttendee {
 }
 
 export function purchaseGroup(groupId: string, attendees: GroupAttendee[]) {
-  return request<{ ticket: PurchasedTicket; checkoutUrl: string }>(`/groups/${groupId}/purchase`, {
+  return request<{ ticket: PurchasedTicket; checkoutUrl: string | null; free?: boolean }>(`/groups/${groupId}/purchase`, {
     method: 'POST',
     body: { attendees },
   });

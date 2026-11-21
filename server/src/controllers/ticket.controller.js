@@ -4,10 +4,11 @@ import User from '../models/User.js';
 import { toPublicTicket } from '../utils/serialize.js';
 import { refundPayment } from '../utils/mercadopago.js';
 import { decryptSecret, isNonEmptyString, isValidEmail } from '../utils/security.js';
+import { incSold } from '../services/reservations.js';
 
 // Tentativas de compra que nunca foram pagas não aparecem em "Meus ingressos"
 // (inclusive reservas que outra pessoa criou usando o email do usuário).
-const NEVER_PAID_REASONS = ['expired', 'checkout_failed', 'replaced', 'payment_rejected'];
+const NEVER_PAID_REASONS = ['expired', 'checkout_failed', 'replaced', 'payment_rejected', 'event_cancelled'];
 
 export async function myTickets(req, res) {
   const tickets = await Ticket.find({
@@ -58,11 +59,8 @@ export async function cancelTicket(req, res) {
     }
   }
 
-  const ticketType = event.ticketTypes.id(ticket.ticketTypeId);
-  if (ticketType) {
-    ticketType.quantitySold = Math.max(0, ticketType.quantitySold - ticket.quantity);
-    await event.save();
-  }
+  // $inc atômico: não sobrescreve compras que acontecem ao mesmo tempo
+  if (ticket.ticketTypeId) await incSold(event._id, ticket.ticketTypeId, -ticket.quantity);
 
   res.json({ ticket: toPublicTicket(locked) });
 }
@@ -102,6 +100,9 @@ export async function checkInTicket(req, res) {
   const event = await Event.findById(ticket.event);
   if (!event || event.organizer.toString() !== req.user._id.toString()) {
     return res.status(403).json({ message: 'Este ingresso não pertence a um evento seu.' });
+  }
+  if (event.status !== 'active') {
+    return res.status(409).json({ message: 'Este evento foi cancelado. A entrada não pode ser validada.' });
   }
 
   if (ticket.status !== 'paid') {
